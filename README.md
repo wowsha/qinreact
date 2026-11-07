@@ -23,7 +23,7 @@ Open the page and drag `id1/pak0.pak` (the 18.7 MB shareware file) onto it, or c
 | Weapons | 1–8, mouse wheel |
 | Pause / Menu | P / Esc |
 
-The menus are the original ones: Single Player (New Game, Load, Save), Options, Help pages and Quit. Multiplayer is shown as unavailable.
+The menus are the original ones: Single Player (New Game, Load, Save), Options, Help pages and Quit. Multiplayer is shown as unavailable. Options includes **HUD Style**: `minimal` (an Ironwail-style HUD, the default) or `classic` (the original status bar, with an opaque background). The choice is saved in the browser.
 
 ## Architecture (`src/engine`)
 | File | Role |
@@ -37,13 +37,13 @@ The menus are the original ones: Single Player (New Game, Load, Save), Options, 
 | `renderer.ts` | Three.js renderer: world and brush entities per texture, packed lightmap atlas with animated light styles, animated textures, turbulent water, scrolling two-layer sky, fullbright pixels, alias models, view model, particles, beams, dynamic lights |
 | `sound.ts` | WAV lumps (with loop cues) played through WebAudio with Quake-style distance attenuation, panning, entity channels and ambient loops |
 | `assets.ts` | Palette, colormap, lump and WAD pictures, conchars font |
-| `game.ts` | Input, view (bob, punch angles, damage kick, stair smoothing, colour shifts), status bar and inventory, intermission, finale, menus, client effects (temp entities, trails, explosions) |
+| `game.ts` | Input, view (bob, punch angles, damage kick, stair smoothing, colour shifts), HUD (minimal or classic status bar), intermission, finale, menus, client effects (temp entities, trails, explosions) |
 
 QuakeC runs unmodified from the PAK's `progs.dat`. It drives monsters, doors, platforms, items, weapons, triggers, teleporters, skill hall and level changes. The server reads the player's `v_angle`, buttons and impulse each tick. Engine events from QuakeC (sounds, lightstyles, centerprint, intermission, temp entities) go to the client through a small event interface.
 
 ## Testing without a browser
 ```bash
-npx tsx scripts/headless.ts /path/to/pak0.pak e1m1   # runs the server and QuakeC for ~25 s of game time
+npx tsx scripts/headless.ts /path/to/pak0.pak e1m1   # runs the server and QuakeC for about 3 s of game time (226 ticks)
 npx tsx scripts/check.ts   /path/to/pak0.pak         # BSP/MDL sanity checks
 ```
 
