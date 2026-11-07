@@ -9,6 +9,7 @@ No existing engine, port or game engine is used. React is the app shell, and Thr
 - Smooth motion: entity positions and angles (doors, platforms, monsters, and the camera) are interpolated between the 72 Hz physics ticks.
 - Animated models blend from the previous pose to the next over 0.1 s, so frame changes don't snap (the original engine does not do this).
 - Works on phones and tablets: on touch devices a movement stick, look-by-drag, fire, jump, weapon and menu buttons appear over the game.
+- Saving: 8 manual save slots, plus an automatic save written when a map starts and every 60 seconds while alive. After death, press fire, jump or Enter (after a short pause) to reload the newest save, or restart the map if there is none.
 - Two HUDs: a minimal Ironwail-style HUD (the default) and the classic status bar, selectable in Options.
 - Drop the PAK onto the page, or click to choose it. The file is parsed in the browser and never uploaded.
 - Console log in the browser's developer tools shows map loads, pickups, centre prints and messages (`[qinreact]` prefix).

@@ -73,6 +73,11 @@ export class Game {
   onStatus: (s: string) => void = () => {};
   clientTime = 0;
   saves: (string | null)[] = new Array(8).fill(null);
+  // Automatic save: written when a map starts and every 60 s while alive.
+  autoRaw: string | null = null;
+  lastAuto = 0;
+  currentMap = '';
+  deadAt = 0;
 
   constructor(public glCanvas: HTMLCanvasElement, public hudCanvas: HTMLCanvasElement, assets: Assets) {
     this.assets = assets;
@@ -88,6 +93,7 @@ export class Game {
       if (typeof s.bright === 'number') this.brightness = s.bright;
       if (s.hud === 'classic' || s.hud === 'minimal') this.hudStyle = s.hud;
       for (let i = 0; i < 8; i++) this.saves[i] = localStorage.getItem('quakejs.save' + i);
+      this.autoRaw = localStorage.getItem('quakejs.auto');
     } catch { /* ignore */ }
     this.applyBrightness();
   }
@@ -130,6 +136,7 @@ export class Game {
     if (!progs) throw new Error('progs.dat missing from PAK');
     const sv = new Server(progs, (n) => this.assets.bsp(n));
     this.wire(sv);
+    (globalThis as any).__game = this;
     return sv;
   }
 
@@ -222,6 +229,10 @@ export class Game {
       this.state = 'playing';
       console.log(`[qinreact] loaded map ${map} (${sv.numEdicts} edicts, ${sv.statics.length} static entities, newGame=${newGame})`);
       this.oldZ = sv.vget(1, 'origin')[2];
+      this.currentMap = map;
+      this.deadAt = 0;
+      this.lastAuto = this.now;
+      this.autosave();
       this.onStatus('');
     } catch (e) {
       console.error('[qinreact] failed to load map', map, e);
@@ -511,6 +522,20 @@ export class Game {
     }
     const sv = this.sv;
     const running = this.state === 'playing' && sv && !this.menu && !this.paused;
+    if (this.state === 'playing' && sv && !this.inter) {
+      if (sv.fget(1, 'health') <= 0) {
+        // Dead: after a short pause, any fire, jump or Enter reloads the newest save.
+        if (!this.deadAt) this.deadAt = this.now;
+        const pressed = (this.mouseButtons & 1) || this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('Space') || this.keys.has('Enter');
+        if (this.now - this.deadAt > 1500 && pressed) {
+          this.respawn();
+          return;
+        }
+      } else {
+        this.deadAt = 0;
+        if (running && this.now - this.lastAuto > 60000) this.autosave();
+      }
+    }
     if (this.state === 'playing' && sv) {
       if (running) {
         const turn = 140 * dt * (this.alwaysRun !== (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) ? 1.5 : 1);
@@ -954,13 +979,22 @@ export class Game {
         break;
       case 'saveload': {
         if (k === 'Escape') return back('single');
-        cur('saveload', 8);
+        cur('saveload', 9);
         if (enter) {
           const slot = this.menuCursor.saveload;
-          if (this.menuCursor.single === 2) {
+          if (slot === 8) {
+            if (this.menuCursor.single === 2) {
+              this.menuMsg = 'Autosave is automatic';
+              this.menuMsgUntil = this.now + 2000;
+            } else if (this.autoRaw) this.loadRaw(this.autoRaw);
+            else {
+              this.menuMsg = 'No autosave yet';
+              this.menuMsgUntil = this.now + 2000;
+            }
+          } else if (this.menuCursor.single === 2) {
             if (inGame && this.sv) {
               try {
-                const data = JSON.stringify(this.sv.saveState());
+                const data = this.snapshotRaw();
                 localStorage.setItem('quakejs.save' + slot, data);
                 this.saves[slot] = data;
                 this.menuMsg = 'Game saved';
@@ -1015,11 +1049,50 @@ export class Game {
     if (this.state === 'playing' && !this.inter) this.hudCanvas.requestPointerLock?.();
   }
 
+  // Saves carry a real-time stamp so the newest one can be found for respawning.
+  private snapshotRaw(): string {
+    return JSON.stringify({ ...this.sv!.saveState(), savedAt: Date.now() });
+  }
+  autosave(): boolean {
+    const sv = this.sv;
+    if (!sv || this.state !== 'playing' || this.inter || sv.fget(1, 'health') <= 0) return false;
+    this.lastAuto = this.now;
+    try {
+      const data = this.snapshotRaw();
+      localStorage.setItem('quakejs.auto', data);
+      this.autoRaw = data;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  // The newest of the autosave and the eight manual saves.
+  private newestSave(): string | null {
+    let best: string | null = null;
+    let bestT = -1;
+    for (const r of [this.autoRaw, ...this.saves]) {
+      if (!r) continue;
+      let t = 0;
+      try { t = JSON.parse(r).savedAt ?? 0; } catch { continue; }
+      if (t > bestT) { bestT = t; best = r; }
+    }
+    return best;
+  }
+  respawn() {
+    this.deadAt = 0;
+    const raw = this.newestSave();
+    if (raw) this.loadRaw(raw);
+    else this.queueLevel(this.currentMap, true);
+  }
+
   loadGame(slot: number) {
-    const raw = this.saves[slot];
+    this.loadRaw(this.saves[slot]);
+  }
+  loadRaw(raw: string | null) {
     if (!raw) return;
     try {
       const snap = JSON.parse(raw);
+      this.currentMap = snap.mapName ?? this.currentMap;
       this.sv = this.makeServer();
       this.state = 'loading';
       this.levelReady = false;
@@ -1080,13 +1153,14 @@ export class Game {
       case 'saveload': {
         const saving = this.menuCursor.single === 2;
         title(saving ? 'gfx/p_save.lmp' : 'gfx/p_load.lmp');
-        for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < 9; i++) {
           let label = '--- UNUSED SLOT ---';
-          const s = this.saves[i];
+          const s = i < 8 ? this.saves[i] : this.autoRaw;
+          if (i === 8) label = s ? 'AUTO' : 'AUTO (none yet)';
           if (s) {
             try {
               const j = JSON.parse(s);
-              label = `${j.mapName} (${Math.floor(j.time)}s)`;
+              label = `${i === 8 ? 'AUTO: ' : ''}${j.mapName} (${Math.floor(j.time)}s)`;
             } catch { label = 'saved game'; }
           }
           this.text(label, 16, 32 + 8 * i);
