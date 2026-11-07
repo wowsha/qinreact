@@ -35,6 +35,9 @@ void main(){
   gl_FragColor = vec4(t.rgb * lit, 1.0);
 }`;
 const ALIAS_BLEND = 0.1; // seconds to blend between animation poses
+// Stable per-entity animation phase (like Quake's syncbase), so grouped MDL animations
+// of identical monsters do not play in lockstep.
+const syncOffset = (e: number) => ((e * 0.6180339887) % 1) * 10;
 const ALIAS_VS = /* glsl */ `
 attribute vec3 pos2; attribute vec3 nrm2; uniform float mixT;
 varying vec2 vUv; varying float vShade;
@@ -113,8 +116,13 @@ class AliasVis {
       // Blend from the pose on screen to the new one over ALIAS_BLEND seconds.
       const first = this.lastPose === null;
       if (!first) {
-        (this.pos2.array as Float32Array).set(this.pos.array as Float32Array);
-        (this.nrm2.array as Float32Array).set(this.nrm.array as Float32Array);
+        // Start the new blend from what is on screen right now (possibly mid-blend),
+        // so an interrupted transition does not snap.
+        const m = this.mat.uniforms.mixT.value as number;
+        const p2 = this.pos2.array as Float32Array, n2 = this.nrm2.array as Float32Array;
+        const p1 = this.pos.array as Float32Array, n1 = this.nrm.array as Float32Array;
+        for (let i = 0; i < p2.length; i++) p2[i] += (p1[i] - p2[i]) * m;
+        for (let i = 0; i < n2.length; i++) n2[i] += (n1[i] - n2[i]) * m;
         this.blend0 = time;
       }
       this.lastPose = pose;
@@ -272,9 +280,20 @@ export class GameRenderer {
   }
 
   // ---------------- level ----------------
+  private disposeGroup(g: { group: THREE.Group; mats: { mat: THREE.ShaderMaterial }[] }) {
+    this.root.remove(g.group);
+    g.group.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+    });
+    for (const m of g.mats) m.mat.dispose();
+  }
+
   clearLevel() {
-    for (const m of this.models) this.root.remove(m.group);
+    for (const m of this.models) this.disposeGroup(m);
     this.models = [];
+    for (const g of this.brushGroups.values()) this.disposeGroup(g);
+    this.brushGroups.clear();
     for (const v of this.entVis.values()) this.root.remove(v.mesh);
     this.entVis.clear();
     for (const v of this.staticVis) this.root.remove(v.mesh);
@@ -462,6 +481,10 @@ export class GameRenderer {
     const group = new THREE.Group();
     const buckets = new Map<number, { pos: number[]; uv: number[]; lm: number[]; idx: number[] }>();
     const W = this.lmW, H = this.lmH;
+    // Separate BSPs (pickup models) have their own face numbering, so the world's
+    // face rectangles and atlas do not apply to them. They render fully lit instead.
+    const ownBsp = bsp !== this.bsp;
+    const lmTex = ownBsp ? { value: this.whiteLightmap() } : this.lmU;
     for (let fi = m.firstface; fi < m.firstface + m.numfaces; fi++) {
       const f = bsp.faces[fi];
       const ti = bsp.texinfo[f.texinfo];
@@ -471,7 +494,7 @@ export class GameRenderer {
       if (!b) buckets.set(ti.miptex, (b = { pos: [], uv: [], lm: [], idx: [] }));
       const tw = tex ? tex.width : 64, th = tex ? tex.height : 64;
       const base = b.pos.length / 3;
-      const rx = this.faceRect[fi * 2], ry = this.faceRect[fi * 2 + 1];
+      const rx = ownBsp ? -1 : this.faceRect[fi * 2], ry = ownBsp ? -1 : this.faceRect[fi * 2 + 1];
       for (let k = 0; k < f.numedges; k++) {
         const v = bsp.faceVertexIndex(f, k);
         const x = bsp.vertices[v * 3], y = bsp.vertices[v * 3 + 1], z = bsp.vertices[v * 3 + 2];
@@ -499,7 +522,7 @@ export class GameRenderer {
         uniforms: {
           map: { value: mode === 2 && this.skyTex ? this.skyTex[0] : this.texture(bsp, texIdx) },
           map2: { value: this.skyTex ? this.skyTex[1] : this.missingTex },
-          lightmap: this.lmU, dl: this.dlU, time: this.timeU, mode: { value: mode },
+          lightmap: lmTex, dl: this.dlU, time: this.timeU, mode: { value: mode },
           texSize: { value: new THREE.Vector2(tex?.width ?? 64, tex?.height ?? 64) },
         },
       });
@@ -509,6 +532,15 @@ export class GameRenderer {
       mats.push({ mat, tex: texIdx });
     }
     return { group, mats };
+  }
+
+  private whiteLm: THREE.DataTexture | null = null;
+  private whiteLightmap(): THREE.DataTexture {
+    if (!this.whiteLm) {
+      this.whiteLm = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+      this.whiteLm.needsUpdate = true;
+    }
+    return this.whiteLm;
   }
 
   // ---------------- alias models ----------------
@@ -696,7 +728,7 @@ export class GameRenderer {
           v.mesh.position.set(origin[0], origin[1], origin[2]);
           this.setRot(v.mesh, ang);
           const a = this.getAlias(name)!;
-          v.setPose(sv.fget(e, 'frame') | 0, time, a.skins, sv.fget(e, 'skin') | 0, time);
+          v.setPose(sv.fget(e, 'frame') | 0, time + syncOffset(e), a.skins, sv.fget(e, 'skin') | 0, time);
           v.mat.uniforms.light.value = this.lightAt(origin, p.dlights);
         }
       }
