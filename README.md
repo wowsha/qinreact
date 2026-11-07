@@ -49,6 +49,6 @@ npx tsx scripts/check.ts   /path/to/pak0.pak         # BSP/MDL sanity checks
 
 ## Known limitations
 - No CD music, demos or sprites (the explosion is particles plus a dynamic light). Multiplayer is not implemented.
-- Models are not interpolated between frames (as in the original). Rotating brush entities collide as axis-aligned boxes.
+- Animated models blend between poses over 0.1 s, which the original engine does not do. Entity positions and angles (doors, platforms, monsters, the camera) are interpolated between 72 Hz physics ticks. Rotating brush entities collide as axis-aligned boxes.
 - Lightmap brightness has a 1.5× gain applied to approximate the original look. Adjust it in `renderer.ts` (`WORLD_FS`).
 - The sandbox where this was built had no GPU. Rendering was checked with software WebGL in headless Chromium, and a real-GPU test would still be useful.
