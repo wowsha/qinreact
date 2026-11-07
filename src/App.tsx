@@ -120,6 +120,7 @@ export default function App() {
           QUAKE-STYLE ENGINE
         </h1>
         <p className="text-stone-400 mb-8 text-sm">A from-scratch BSP renderer, QuakeC virtual machine and Quake physics, running in your browser.</p>
+        <p className="text-stone-500 mb-8 text-xs">Not affiliated with, endorsed by or sponsored by id Software or ZeniMax Media. Quake is a trademark of id Software. Game data is not included.</p>
         <div
           className={`rounded-lg border-2 border-dashed px-8 py-14 transition-colors cursor-pointer ${over ? 'border-amber-400 bg-amber-950/40' : 'border-stone-600 bg-black/30 hover:border-amber-700'}`}
           onClick={() => fileInput.current?.click()}
