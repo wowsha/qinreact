@@ -66,3 +66,7 @@ npx tsx scripts/check.ts   /path/to/pak0.pak         # BSP/MDL sanity checks
 - Rotating brush entities collide as axis-aligned boxes.
 - Lightmap brightness has a 1.5× gain applied to approximate the original look. Adjust it in `renderer.ts` (`WORLD_FS`).
 - The sandbox where this was built had no GPU. Rendering was checked with software WebGL in headless Chromium, and a real-GPU test would still be useful.
+
+## License
+
+The engine source in this repository is released under the [MIT License](LICENSE). The Quake game data (`pak0.pak`, including `progs.dat`, models, sounds and maps) is not included and is not covered by this license. It belongs to id Software and must be supplied by the user.
