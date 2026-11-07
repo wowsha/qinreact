@@ -142,7 +142,13 @@ export function installBuiltins(sv: Server) {
   });
   B('dprint', (v) => console.log('[dprint]', v.sparm(0)));
   // single player: suppress multiplayer join/leave broadcasts
-  B('bprint', (v) => { const m = v.sparm(0); if (/(entered|joined) the game/i.test(m)) return; sv.ev.print?.(m); });
+  B('bprint', (v) => {
+    const m = v.sparm(0);
+    // Join messages, and the bare player name Quake prints before them, are not shown.
+    if (/(entered|joined) the game/i.test(m)) return;
+    if (m.trim() === sv.vm.str(sv.iget(1, 'netname'))) return;
+    sv.ev.print?.(m);
+  });
   B('sprint', (v) => sv.ev.print?.(v.sparm(1)));
   B('centerprint', (v) => sv.ev.centerprint?.(v.sparm(1)));
   B('stuffcmd', (v) => sv.ev.stuffcmd?.(v.sparm(1)));

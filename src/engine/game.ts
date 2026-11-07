@@ -327,22 +327,27 @@ export class Game {
   }
 
   // ------------------------------------------------------------ messages
+  // Quake sends one message as several print calls (e.g. "You got the" + "shells"),
+  // so fragments are joined until a newline or a short pause with no more output.
+  private conTimer: ReturnType<typeof setTimeout> | null = null;
   conPrint(s: string) {
-    // Each print call is its own message: a call without a trailing newline
-    // must not run into the next call (this produced "playerplayer" text).
-    const flush = () => {
-      if (this.conLine.trim()) {
-        console.log(`[qinreact] ${this.conLine.trim()}`);
-        this.con.push({ text: this.conLine, time: this.now });
-        if (this.con.length > 40) this.con.shift();
-      }
-      this.conLine = '';
-    };
     for (const ch of s) {
-      if (ch === '\n') flush();
+      if (ch === '\n') this.conFlush();
       else this.conLine += ch;
     }
-    flush();
+    if (this.conLine.trim() && this.conTimer === null) this.conTimer = setTimeout(() => this.conFlush(), 50);
+  }
+  conFlush() {
+    if (this.conTimer !== null) {
+      clearTimeout(this.conTimer);
+      this.conTimer = null;
+    }
+    if (this.conLine.trim()) {
+      console.log(`[qinreact] ${this.conLine.trim()}`);
+      this.con.push({ text: this.conLine, time: this.now });
+      if (this.con.length > 40) this.con.shift();
+    }
+    this.conLine = '';
   }
 
   stuffcmd(s: string) {
