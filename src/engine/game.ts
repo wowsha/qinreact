@@ -133,18 +133,24 @@ export class Game {
 
   private wire(sv: Server) {
     sv.ev = {
-      sound: (e, ch, name, vol, attn, org) => this.snd.play(e, ch, name, vol, attn, org),
+      sound: (e, ch, name, vol, attn, org) => {
+        // Item pickups play items/*.wav; log them so pickups show in the console.
+        if (name.startsWith('items/')) console.log(`[quake] pickup sound ${name}`);
+        this.snd.play(e, ch, name, vol, attn, org);
+      },
       ambient: (org, name, vol, attn) => {
         this.ambientQueue.push({ org, name, vol, attn });
       },
       print: (s) => this.conPrint(s),
       centerprint: (s) => {
+        console.log(`[quake] center: ${s.replace(/\n/g, ' / ')}`);
         this.center = { text: s, until: this.now + 2000 };
       },
       lightstyle: (i, s) => this.rend.setLightstyle(i, s),
       particle: (org, dir, color, count) => (count >= 255 ? this.particleExplosion(org) : this.runParticles(org, dir, color, count)),
       temp: (t, a) => this.tempEntity(t, a),
       intermission: () => {
+        console.log('[quake] intermission');
         this.inter = true;
         this.interTime = sv.time;
         this.intermissionAt = this.now;
@@ -212,10 +218,11 @@ export class Game {
       const a = sv.vget(1, 'angles');
       this.viewAngles = [a[0], a[1], 0];
       this.state = 'playing';
+      console.log(`[quake] loaded map ${map} (${sv.numEdicts} edicts, ${sv.statics.length} static entities, newGame=${newGame})`);
       this.oldZ = sv.vget(1, 'origin')[2];
       this.onStatus('');
     } catch (e) {
-      console.error(e);
+      console.error('[quake] failed to load map', map, e);
       this.conPrint('\x01Could not load map ' + map + ': ' + (e as Error).message + '\n');
       if (map !== 'start') {
         this.startLevel('start', true);
@@ -325,6 +332,7 @@ export class Game {
     // must not run into the next call (this produced "playerplayer" text).
     const flush = () => {
       if (this.conLine.trim()) {
+        console.log(`[quake] ${this.conLine.trim()}`);
         this.con.push({ text: this.conLine, time: this.now });
         if (this.con.length > 40) this.con.shift();
       }

@@ -4,6 +4,20 @@ A Quake engine written from scratch for the browser. Drop the **shareware `pak0.
 
 No Quake engine, port or game engine is used. React is the app shell, and Three.js is used only as a general-purpose WebGL wrapper (textures, buffers, shaders). Everything else is in `src/engine/`: PAK/WAD/BSP/MDL parsing, collision, physics, the QuakeC VM and the game flow. The file formats were implemented from my own knowledge of them.
 
+## Features
+- Runs the original `progs.dat` QuakeC logic: monsters, doors, platforms, items, weapons, triggers, teleporters, skill hall and level changes.
+- Smooth motion: entity positions and angles (doors, platforms, monsters, and the camera) are interpolated between the 72 Hz physics ticks.
+- Animated models blend from the previous pose to the next over 0.1 s, so frame changes don't snap (the original engine does not do this).
+- Two HUDs: a minimal Ironwail-style HUD (the default) and the classic status bar, selectable in Options.
+- Drop the PAK onto the page, or click to choose it. The file is parsed in the browser and never uploaded.
+- Console log in the browser's developer tools shows map loads, pickups, centre prints and messages (`[quake]` prefix).
+
+## Screenshots
+
+| Minimal HUD (E1M1) | Classic HUD (E1M2) |
+|---|---|
+| ![E1M1 with the minimal HUD](screenshots/e1m1-minimal-hud.png) | ![E1M2 with the classic HUD](screenshots/e1m2-classic-hud.png) |
+
 ## Run
 
 ```bash
@@ -49,6 +63,6 @@ npx tsx scripts/check.ts   /path/to/pak0.pak         # BSP/MDL sanity checks
 
 ## Known limitations
 - No CD music, demos or sprites (the explosion is particles plus a dynamic light). Multiplayer is not implemented.
-- Animated models blend between poses over 0.1 s, which the original engine does not do. Entity positions and angles (doors, platforms, monsters, the camera) are interpolated between 72 Hz physics ticks. Rotating brush entities collide as axis-aligned boxes.
+- Rotating brush entities collide as axis-aligned boxes.
 - Lightmap brightness has a 1.5× gain applied to approximate the original look. Adjust it in `renderer.ts` (`WORLD_FS`).
 - The sandbox where this was built had no GPU. Rendering was checked with software WebGL in headless Chromium, and a real-GPU test would still be useful.

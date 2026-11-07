@@ -25,6 +25,7 @@ export default function App() {
       const buf = await file.arrayBuffer();
       const pak = new Pak(buf);
       setInfo(`Parsed PAK directory: ${pak.entries.size} files`);
+      console.log(`[quake] PAK parsed: ${pak.entries.size} files`);
       const assets = new Assets(pak);
       const missing = assets.validate();
       if (missing.length) throw new Error('This PAK is missing: ' + missing.join(', '));
