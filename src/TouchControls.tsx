@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as PE } from 'react';
 import type { Game } from './engine/game';
 
@@ -27,7 +27,24 @@ const STICK_R = 56;
 const btn = 'pointer-events-auto absolute flex items-center justify-center rounded-full border border-amber-200/40 bg-stone-900/60 text-amber-100 text-xs font-bold select-none touch-none';
 
 export function TouchControls({ game }: { game: Game }) {
+  const root = useRef<HTMLDivElement>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
+
+  // Stop the browser from taking over drags (iOS edge swipes, scrolling, pinch zoom).
+  // React attaches touch listeners as passive, so this needs a native listener.
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const stop = (e: Event) => e.preventDefault();
+    el.addEventListener('touchstart', stop, { passive: false });
+    el.addEventListener('touchmove', stop, { passive: false });
+    document.addEventListener('gesturestart', stop);
+    return () => {
+      el.removeEventListener('touchstart', stop);
+      el.removeEventListener('touchmove', stop);
+      document.removeEventListener('gesturestart', stop);
+    };
+  }, []);
   const stick = useRef<{ id: number; cx: number; cy: number; held: Set<string> } | null>(null);
   const look = useRef<{ id: number; x: number; y: number } | null>(null);
 
@@ -88,7 +105,7 @@ export function TouchControls({ game }: { game: Game }) {
   });
 
   return (
-    <div className="absolute inset-0 pointer-events-none touch-none z-10" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+    <div ref={root} className="absolute inset-0 pointer-events-none touch-none z-10" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
       {/* look zone: right half, under the buttons */}
       <div
         className="pointer-events-auto absolute top-0 bottom-0 right-0 w-1/2 touch-none"
@@ -100,7 +117,7 @@ export function TouchControls({ game }: { game: Game }) {
 
       {/* movement stick */}
       <div
-        className={`${btn} left-5 w-36 h-36 bg-stone-900/40`}
+        className={`${btn} left-10 w-36 h-36 bg-stone-900/40`}
         style={{ bottom: 'calc(6.5rem + env(safe-area-inset-bottom))' }}
         onPointerDown={stickDown}
         onPointerMove={stickMove}
