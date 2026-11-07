@@ -30,6 +30,8 @@ export class Game {
   paused = false;
   keys = new Set<string>();
   mouseButtons = 0;
+  // Touch devices never get pointer lock, so look and fire must not wait for it.
+  touchMode = false;
   viewAngles: [number, number, number] = [0, 0, 0];
   cmd: UserCmd = { forward: 0, side: 0, up: 0, buttons: 0, impulse: 0, angles: [0, 0, 0] };
   sens = 3;
@@ -263,7 +265,7 @@ export class Game {
     this.keys.delete(ev.code);
   }
   onMouseMove(dx: number, dy: number) {
-    if (document.pointerLockElement !== this.glCanvas && document.pointerLockElement !== this.hudCanvas) return;
+    if (!this.touchMode && document.pointerLockElement !== this.glCanvas && document.pointerLockElement !== this.hudCanvas) return;
     if (this.menu || this.state !== 'playing' || this.paused) return;
     const s = this.sens * 0.022;
     this.viewAngles[1] -= dx * s;
@@ -281,7 +283,7 @@ export class Game {
       if (this.now - this.finaleStart > 1500) this.exitToTitle();
       return;
     }
-    if (!document.pointerLockElement && !this.inter) {
+    if (!this.touchMode && !document.pointerLockElement && !this.inter) {
       this.hudCanvas.requestPointerLock?.();
       return;
     }
@@ -295,6 +297,7 @@ export class Game {
     this.cmd.impulse = dy < 0 ? 10 : 12;
   }
   onPointerLockChange() {
+    if (this.touchMode) return;
     if (!document.pointerLockElement && this.state === 'playing' && !this.menu && !this.inter) {
       this.menu = 'main';
     }
