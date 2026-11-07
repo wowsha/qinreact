@@ -120,7 +120,7 @@ export default function App() {
           QINREACT
         </h1>
         <p className="text-stone-400 mb-8 text-sm">A from-scratch BSP renderer, QuakeC virtual machine and physics for the original game data, running in your browser.</p>
-        <p className="text-stone-500 mb-8 text-xs">Not affiliated with, endorsed by or sponsored by id Software or ZeniMax Media. Quake is a trademark of id Software. Game data is not included.</p>
+        <p className="text-stone-500 mb-8 text-xs">Not affiliated with, endorsed by or sponsored by id Software or ZeniMax Media. Quake is a trademark of id Software. Game data is not included. <a className="underline hover:text-stone-300" href="https://github.com/wowsha/qinreact/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noreferrer">Third-party notices</a> · <a className="underline hover:text-stone-300" href="https://github.com/wowsha/qinreact/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT license</a></p>
         <div
           className={`rounded-lg border-2 border-dashed px-8 py-14 transition-colors cursor-pointer ${over ? 'border-amber-400 bg-amber-950/40' : 'border-stone-600 bg-black/30 hover:border-amber-700'}`}
           onClick={() => fileInput.current?.click()}
