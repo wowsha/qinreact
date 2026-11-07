@@ -73,4 +73,4 @@ This project is not affiliated with, endorsed by or sponsored by id Software or 
 
 ## License
 
-The engine source in this repository is released under the [MIT License](LICENSE). The Quake game data (`pak0.pak`, including `progs.dat`, models, sounds and maps) is not included and is not covered by this license. It belongs to id Software and must be supplied by the user.
+The engine source in this repository is released under the [MIT License](LICENSE). Third-party libraries in the built page are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Quake game data (`pak0.pak`, including `progs.dat`, models, sounds and maps) is not included and is not covered by this license. It belongs to id Software and must be supplied by the user.
