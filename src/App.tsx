@@ -25,7 +25,7 @@ export default function App() {
       const buf = await file.arrayBuffer();
       const pak = new Pak(buf);
       setInfo(`Parsed PAK directory: ${pak.entries.size} files`);
-      console.log(`[quake] PAK parsed: ${pak.entries.size} files`);
+      console.log(`[qinreact] PAK parsed: ${pak.entries.size} files`);
       const assets = new Assets(pak);
       const missing = assets.validate();
       if (missing.length) throw new Error('This PAK is missing: ' + missing.join(', '));
@@ -117,9 +117,9 @@ export default function App() {
     >
       <div className="max-w-xl w-full text-center">
         <h1 className="text-5xl font-bold tracking-widest text-amber-500 mb-1" style={{ fontFamily: 'Impact, Haettenschweiler, sans-serif', textShadow: '0 3px 0 #4a2200' }}>
-          QUAKE-STYLE ENGINE
+          QINREACT
         </h1>
-        <p className="text-stone-400 mb-8 text-sm">A from-scratch BSP renderer, QuakeC virtual machine and Quake physics, running in your browser.</p>
+        <p className="text-stone-400 mb-8 text-sm">A from-scratch BSP renderer, QuakeC virtual machine and physics for the original game data, running in your browser.</p>
         <p className="text-stone-500 mb-8 text-xs">Not affiliated with, endorsed by or sponsored by id Software or ZeniMax Media. Quake is a trademark of id Software. Game data is not included.</p>
         <div
           className={`rounded-lg border-2 border-dashed px-8 py-14 transition-colors cursor-pointer ${over ? 'border-amber-400 bg-amber-950/40' : 'border-stone-600 bg-black/30 hover:border-amber-700'}`}
