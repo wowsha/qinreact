@@ -3,12 +3,14 @@ import { Pak } from './engine/pak';
 import { Assets } from './engine/assets';
 import { Game } from './engine/game';
 import { TouchControls } from './TouchControls';
+import { CoopPanel } from './CoopPanel';
 
 type Phase = 'drop' | 'loading' | 'game';
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>('drop');
   const [touchGame, setTouchGame] = useState<Game | null>(null);
+  const [coopOpen, setCoopOpen] = useState(false);
   const [error, setError] = useState('');
   const [over, setOver] = useState(false);
   const [info, setInfo] = useState('');
@@ -46,6 +48,7 @@ export default function App() {
     game.touchMode = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
     gameRef.current = game;
     setTouchGame(game);
+    game.onCoop = () => setCoopOpen(true);
     (window as unknown as { __game?: Game }).__game = game;
     game.onQuit = () => {
       game.destroy();
@@ -106,6 +109,7 @@ export default function App() {
         <canvas ref={glRef} className="absolute inset-0 w-full h-full" style={{ imageRendering: 'pixelated' }} />
         <canvas ref={hudRef} className="absolute inset-0 w-full h-full" style={{ imageRendering: 'pixelated' }} />
         {touchGame && touchGame.touchMode && <TouchControls game={touchGame} />}
+        {coopOpen && touchGame && <CoopPanel game={touchGame} onClose={() => setCoopOpen(false)} />}
       </div>
     );
   }

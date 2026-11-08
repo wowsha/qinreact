@@ -1,4 +1,5 @@
 // Client side: input, view calculation, HUD, menus, effects and game flow.
+import { NetSession } from './net';
 import { Assets } from './assets';
 import { GameRenderer, DLight, Particle } from './renderer';
 import { SoundSystem } from './sound';
@@ -75,6 +76,9 @@ export class Game {
   saves: (string | null)[] = new Array(8).fill(null);
   // Automatic save: written when a map starts and every 60 s while alive.
   autoRaw: string | null = null;
+  // Co-op over the network (see net.ts). Singleplayer leaves this null.
+  net: NetSession | null = null;
+  onCoop: (() => void) | null = null;
   lastAuto = 0;
   currentMap = '';
   deadAt = 0;
@@ -522,7 +526,7 @@ export class Game {
     }
     const sv = this.sv;
     const running = this.state === 'playing' && sv && !this.menu && !this.paused;
-    if (this.state === 'playing' && sv && !this.inter) {
+    if (this.state === 'playing' && sv && !this.inter && (!this.net || this.net.role === 'host')) {
       if (sv.fget(1, 'health') <= 0) {
         // Dead: after a short pause, any fire, jump or Enter reloads the newest save.
         if (!this.deadAt) this.deadAt = this.now;
@@ -542,7 +546,9 @@ export class Game {
         if (this.keys.has('ArrowLeft')) this.viewAngles[1] += turn;
         if (this.keys.has('ArrowRight')) this.viewAngles[1] -= turn;
         const cmd = this.buildCmd();
-        sv.update(dt, cmd);
+        // A co-op joiner does not simulate: the host's state arrives over the network.
+        if (!this.net || this.net.role === 'host') sv.update(dt, cmd);
+        if (this.net?.role === 'host') this.net.pump(sv);
         this.clientTime += dt;
         if (sv.pendingChange) {
           const map = sv.pendingChange;
@@ -1011,6 +1017,7 @@ export class Game {
         break;
       }
       case 'multi':
+        if (enter) this.onCoop?.();
         if (k === 'Escape' || enter) back('main');
         break;
       case 'options': {
@@ -1050,7 +1057,7 @@ export class Game {
   }
 
   // Saves carry a real-time stamp so the newest one can be found for respawning.
-  private snapshotRaw(): string {
+  snapshotRaw(): string {
     return JSON.stringify({ ...this.sv!.saveState(), savedAt: Date.now() });
   }
   autosave(): boolean {
@@ -1172,8 +1179,8 @@ export class Game {
         plaque();
         title('gfx/p_multi.lmp');
         this.box(40, 80, 240, 40);
-        this.textC('Multiplayer is not available', 94);
-        this.textC('in this build', 104);
+        this.textC('Co-op over the network', 94);
+        this.textC('press Enter to set up', 104);
         break;
       case 'options': {
         plaque();
