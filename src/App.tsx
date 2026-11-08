@@ -52,7 +52,7 @@ export default function App() {
     [loadBuffer],
   );
 
-  const loadShareware = useCallback(() => loadBuffer('quake106.zip (Internet Archive)', fetchShareware), [loadBuffer]);
+  const loadShareware = useCallback(() => loadBuffer('pak0.pak (shareware download)', fetchShareware), [loadBuffer]);
 
   // create the game once the canvases are mounted
   useEffect(() => {
@@ -168,10 +168,10 @@ export default function App() {
             onClick={loadShareware}
             className="px-4 py-2 rounded bg-amber-700 hover:bg-amber-600 text-amber-50 text-sm disabled:opacity-40"
           >
-            Download shareware from the Internet Archive
+            Download shareware pak0.pak
           </button>
           <div className="text-xs text-stone-500 max-w-md">
-            Fetches quake106.zip from archive.org, checks its MD5 checksum, and reads pak0.pak from it in your browser. The Internet Archive hosts the file, not this project.
+            Fetches the shareware pak0.pak from the wowsha/quakeshareware repository and checks its MD5 checksum in your browser. Not affiliated with id Software.
           </div>
         </div>
         {error && <div className="mt-4 text-red-400 text-sm bg-red-950/40 border border-red-900 rounded p-3">{error}</div>}

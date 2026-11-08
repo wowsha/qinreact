@@ -1,9 +1,8 @@
-// Optional shareware download from the Internet Archive. The archive is a third-party host:
-// the file is checked against a known MD5 before anything is used, and the game data is
-// only read in the browser (it is never stored or re-hosted by this project).
+// Optional download of the Quake shareware pak0.pak from the wowsha/quakeshareware repository
+// (a separate repo from this project). The file is checked against a known MD5 before use.
 
-export const SHAREWARE_URL = 'https://archive.org/download/Quake_802/quake106.zip';
-export const SHAREWARE_MD5 = '8cee4d03ee092909fdb6a4f84f0c1357';
+export const SHAREWARE_URL = 'https://raw.githubusercontent.com/wowsha/quakeshareware/main/pak0.pak';
+export const SHAREWARE_MD5 = '5906e5998fc3d896ddaf5e6a62e03abb';
 
 const S = [
   7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
@@ -89,18 +88,18 @@ export async function extractPak(zip: ArrayBuffer): Promise<ArrayBuffer> {
   throw new Error('id1/pak0.pak was not found in this archive.');
 }
 
-/** Download the shareware archive, check it, and return the pak0.pak bytes. */
+/** Download the shareware pak0.pak, check its MD5, and return the bytes. */
 export async function fetchShareware(): Promise<ArrayBuffer> {
   let res: Response;
   try {
     res = await fetch(SHAREWARE_URL);
   } catch {
-    throw new Error('Could not download the shareware from the Internet Archive (the browser may block it). Save quake106.zip yourself and drop it here.');
+    throw new Error('Could not download the shareware (the browser may block it). Drop your own pak0.pak here instead.');
   }
-  if (!res.ok) throw new Error(`The Internet Archive returned HTTP ${res.status}. Save quake106.zip yourself and drop it here.`);
-  const zip = await res.arrayBuffer();
-  if (md5Hex(new Uint8Array(zip)) !== SHAREWARE_MD5) {
-    throw new Error('The downloaded file does not match the expected shareware archive (checksum mismatch).');
+  if (!res.ok) throw new Error(`The download failed (HTTP ${res.status}). Drop your own pak0.pak here instead.`);
+  const pak = await res.arrayBuffer();
+  if (md5Hex(new Uint8Array(pak)) !== SHAREWARE_MD5) {
+    throw new Error('The downloaded file does not match the expected shareware pak0.pak (checksum mismatch).');
   }
-  return extractPak(zip);
+  return pak;
 }
