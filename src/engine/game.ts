@@ -530,12 +530,16 @@ export class Game {
     const running = this.state === 'playing' && sv && !this.menu && !this.paused;
     if (this.state === 'playing' && sv && !this.inter && (!this.net || this.net.role === 'host')) {
       if (sv.fget(this.viewEnt, 'health') <= 0) {
-        // Dead: after a short pause, any fire, jump or Enter reloads the newest save.
-        if (!this.deadAt) this.deadAt = this.now;
-        const pressed = (this.mouseButtons & 1) || this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('Space') || this.keys.has('Enter');
-        if (this.now - this.deadAt > 1500 && pressed) {
-          this.respawn();
-          return;
+        // Singleplayer: after a short pause, any fire, jump or Enter reloads the newest save.
+        // Co-op: nothing is reloaded (that would rewind the friend). The QuakeC code respawns
+        // the player in place when fire is pressed, and the input reaches it through the command.
+        if (!this.net) {
+          if (!this.deadAt) this.deadAt = this.now;
+          const pressed = (this.mouseButtons & 1) || this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('Space') || this.keys.has('Enter');
+          if (this.now - this.deadAt > 1500 && pressed) {
+            this.respawn();
+            return;
+          }
         }
       } else {
         this.deadAt = 0;

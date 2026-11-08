@@ -118,6 +118,11 @@ export class NetSession {
 
   close() {
     if (this.role === 'host' && this.remoteSv && this.remoteEnt) this.remoteSv.removeRemotePlayer(this.remoteEnt);
+    if (this.role === 'host' && this.remoteSv) {
+      // Back to singleplayer rules.
+      this.remoteSv.cvars.coop = 0;
+      this.remoteSv.gset('coop', 0);
+    }
     this.remoteEnt = 0;
     this.remoteSv = null;
     this.inCmd = null;
@@ -143,6 +148,10 @@ export class NetSession {
     // A new level gets a new player entity for the joiner.
     if (sv !== this.remoteSv) {
       this.remoteSv = sv;
+      // Co-op rules: players spawn on the co-op start points. Without this both players
+      // spawn on the single start point and telefrag each other.
+      sv.cvars.coop = 1;
+      sv.gset('coop', 1);
       this.remoteEnt = sv.addRemotePlayer();
       this.needFull = true;
     }
