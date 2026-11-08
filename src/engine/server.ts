@@ -1360,8 +1360,16 @@ export class Server {
       this.prevAng.set(e, Array.from(this.vget(e, 'angles')));
     }
   }
+  /** Co-op joiner: positions arrive as updates, so blend between the last two. */
+  netMode = false;
+  netAt = 0;
+  /** Co-op joiner: call just before applying each update, to keep the previous positions. */
+  netSnapshot() {
+    this.snapshotPrev();
+  }
   /** Fraction (0..1) of the current physics tick that has already elapsed. */
   alpha(): number {
+    if (this.netMode) return Math.min(1, Math.max(0, (performance.now() - this.netAt) / 50));
     return Math.min(1, Math.max(0, this.accum / TICK));
   }
   lerpOrigin(e: number): number[] {

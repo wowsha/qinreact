@@ -26,9 +26,14 @@ export function CoopPanel({ game, onClose, invite }: { game: Game; onClose: () =
       s.onFull = (raw, ent) => {
         game.loadRaw(raw);
         game.setViewEnt(ent);
+        if (game.sv) game.sv.netMode = true;
       };
       s.onDelta = (m) => {
-        if (game.sv) applyDelta(game.sv, m);
+        if (!game.sv) return;
+        // Keep the previous positions so the picture can glide between updates.
+        game.sv.netSnapshot();
+        applyDelta(game.sv, m);
+        game.sv.netAt = performance.now();
       };
     }
     game.net = s;
