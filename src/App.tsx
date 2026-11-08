@@ -8,7 +8,14 @@ import { extractPak, fetchShareware } from './engine/shareware';
 
 type Phase = 'drop' | 'loading' | 'game';
 
+// A co-op invite link carries the invite code in its fragment: #join=<code>
+const inviteFromLink = (): string => {
+  const m = window.location.hash.match(/^#join=([A-Za-z0-9_-]+)$/);
+  return m ? m[1] : '';
+};
+
 export default function App() {
+  const linkInvite = useRef(inviteFromLink());
   const [phase, setPhase] = useState<Phase>('drop');
   const [touchGame, setTouchGame] = useState<Game | null>(null);
   const [coopOpen, setCoopOpen] = useState(false);
@@ -62,6 +69,8 @@ export default function App() {
     gameRef.current = game;
     setTouchGame(game);
     game.onCoop = () => setCoopOpen(true);
+    // Opened from a co-op invite link: go straight to joining.
+    if (linkInvite.current) setCoopOpen(true);
     (window as unknown as { __game?: Game }).__game = game;
     game.onQuit = () => {
       game.destroy();
@@ -122,7 +131,16 @@ export default function App() {
         <canvas ref={glRef} className="absolute inset-0 w-full h-full" style={{ imageRendering: 'pixelated' }} />
         <canvas ref={hudRef} className="absolute inset-0 w-full h-full" style={{ imageRendering: 'pixelated' }} />
         {touchGame && touchGame.touchMode && <TouchControls game={touchGame} />}
-        {coopOpen && touchGame && <CoopPanel game={touchGame} onClose={() => setCoopOpen(false)} />}
+        {coopOpen && touchGame && (
+          <CoopPanel
+            game={touchGame}
+            invite={linkInvite.current}
+            onClose={() => {
+              linkInvite.current = '';
+              setCoopOpen(false);
+            }}
+          />
+        )}
       </div>
     );
   }

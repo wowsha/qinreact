@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Game } from './engine/game';
 import { NetSession, applyDelta } from './engine/net';
 
-// Co-op setup. Connection codes are copied between the two players by hand.
-// The host creates an invite; the joiner pastes it and sends back an answer;
-// the host pastes the answer to connect.
-export function CoopPanel({ game, onClose }: { game: Game; onClose: () => void }) {
+// The invite link opens this app with the invite code in its fragment: #join=<code>
+const inviteLink = (code: string) => `${window.location.origin}${window.location.pathname}#join=${code}`;
+
+// Co-op setup. The host sends an invite link; the friend opens it and copies an answer
+// back; the host pastes the answer to connect. Nobody types the codes.
+export function CoopPanel({ game, onClose, invite }: { game: Game; onClose: () => void; invite?: string }) {
   const [session, setSession] = useState<NetSession | null>(game.net);
   const [mode, setMode] = useState<'host' | 'join' | null>(game.net ? (game.net.role === 'host' ? 'host' : 'join') : null);
   const [code, setCode] = useState('');
@@ -13,7 +15,7 @@ export function CoopPanel({ game, onClose }: { game: Game; onClose: () => void }
   const [status, setStatus] = useState(game.net?.status ?? '');
   const [err, setErr] = useState('');
 
-  const start = (role: 'host' | 'join') => {
+  const start = (role: 'host' | 'join', joinInvite?: string) => {
     session?.close();
     const s = new NetSession(role === 'host' ? 'host' : 'client');
     s.onStatus = () => setStatus(s.status);
@@ -32,10 +34,22 @@ export function CoopPanel({ game, onClose }: { game: Game; onClose: () => void }
     setSession(s);
     setMode(role);
     setCode('');
-    setPaste('');
+    setPaste(joinInvite ?? '');
     setErr('');
     setStatus(s.status);
+    if (role === 'join' && joinInvite) {
+      s.createAnswer(joinInvite)
+        .then((answer) => setCode(answer))
+        .catch((e) => setErr(e instanceof Error ? e.message : 'That invite did not work.'));
+    }
   };
+
+  // Opened from an invite link: join straight away.
+  useEffect(() => {
+    if (invite && !game.net) start('join', invite);
+    // Runs once, when the panel opens from a link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const guard = async (fn: () => Promise<void>) => {
     setErr('');
@@ -76,28 +90,33 @@ export function CoopPanel({ game, onClose }: { game: Game; onClose: () => void }
               setCode(await session.createInvite());
             })}>Create invite</button>
             {code && (
-              <>
-                <textarea readOnly className={area} value={code} />
-                <button className={btn} onClick={() => copy(code)}>Copy invite</button>
-              </>
+              <div className="space-y-2">
+                <button className={btn} onClick={() => copy(inviteLink(code))}>Copy invite link</button>
+                <p className="text-xs text-stone-400">Send the link to your friend. They open it, copy their answer, and send it back.</p>
+              </div>
             )}
-            <textarea className={area} placeholder="Paste the answer from your friend" value={paste} onChange={(e) => setPaste(e.target.value)} />
+            <p className="text-sm">Paste the answer from your friend:</p>
+            <textarea className={area} placeholder="Paste the answer here" value={paste} onChange={(e) => setPaste(e.target.value)} />
             <button className={btn} disabled={!paste.trim()} onClick={() => guard(() => session.acceptAnswer(paste))}>Connect</button>
           </div>
         )}
 
         {mode === 'join' && session && (
           <div className="space-y-3">
-            <p className="text-sm">Joining. Paste the invite from the host.</p>
-            <textarea className={area} placeholder="Paste the invite" value={paste} onChange={(e) => setPaste(e.target.value)} />
-            <button className={btn} disabled={!paste.trim()} onClick={() => guard(async () => {
-              setCode(await session.createAnswer(paste));
-            })}>Create answer</button>
-            {code && (
+            {!code && (
               <>
-                <textarea readOnly className={area} value={code} />
-                <button className={btn} onClick={() => copy(code)}>Copy answer</button>
+                <p className="text-sm">Joining. Paste the invite link or code from the host.</p>
+                <textarea className={area} placeholder="Paste the invite here" value={paste} onChange={(e) => setPaste(e.target.value)} />
+                <button className={btn} disabled={!paste.trim()} onClick={() => guard(async () => {
+                  setCode(await session.createAnswer(paste.trim().replace(/^.*#join=/, '')));
+                })}>Create answer</button>
               </>
+            )}
+            {code && (
+              <div className="space-y-2">
+                <button className={btn} onClick={() => copy(code)}>Copy answer</button>
+                <p className="text-xs text-stone-400">Send this answer back to the host. They paste it to connect.</p>
+              </div>
             )}
           </div>
         )}
