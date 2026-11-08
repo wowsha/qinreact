@@ -4,6 +4,7 @@ import { Assets } from './engine/assets';
 import { Game } from './engine/game';
 import { TouchControls } from './TouchControls';
 import { CoopPanel } from './CoopPanel';
+import { extractPak, fetchShareware } from './engine/shareware';
 
 type Phase = 'drop' | 'loading' | 'game';
 
@@ -21,12 +22,13 @@ export default function App() {
   const assetsRef = useRef<Assets | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const loadFile = useCallback(async (file: File) => {
+  // Load pak0.pak bytes from any source: a dropped/chosen file, a dropped zip, or the download button.
+  const loadBuffer = useCallback(async (name: string, getBuf: () => Promise<ArrayBuffer>) => {
     setError('');
     setPhase('loading');
-    setInfo(`Reading ${file.name} (${(file.size / 1048576).toFixed(1)} MB)…`);
+    setInfo(`Reading ${name}…`);
     try {
-      const buf = await file.arrayBuffer();
+      const buf = await getBuf();
       const pak = new Pak(buf);
       setInfo(`Parsed PAK directory: ${pak.entries.size} files`);
       console.log(`[qinreact] PAK parsed: ${pak.entries.size} files`);
@@ -40,6 +42,17 @@ export default function App() {
       setPhase('drop');
     }
   }, []);
+
+  const loadFile = useCallback(
+    (file: File) =>
+      loadBuffer(file.name, async () => {
+        const b = await file.arrayBuffer();
+        return /\.zip$/i.test(file.name) ? extractPak(b) : b;
+      }),
+    [loadBuffer],
+  );
+
+  const loadShareware = useCallback(() => loadBuffer('quake106.zip (Internet Archive)', fetchShareware), [loadBuffer]);
 
   // create the game once the canvases are mounted
   useEffect(() => {
@@ -143,10 +156,23 @@ export default function App() {
           ) : (
             <>
               <div className="text-2xl text-amber-300 mb-2">Drop <code className="text-amber-200">pak0.pak</code> here</div>
-              <div className="text-stone-400 text-sm">…or click to choose the file.<br />Use the Quake shareware <code>id1/pak0.pak</code>. It is parsed locally in your browser and never uploaded.</div>
+              <div className="text-stone-400 text-sm">…or click to choose the file. A zip containing it (quake106.zip) also works.<br />Use the Quake shareware <code>id1/pak0.pak</code>. It is parsed locally in your browser and never uploaded.</div>
             </>
           )}
-          <input ref={fileInput} type="file" accept=".pak" className="hidden" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
+          <input ref={fileInput} type="file" accept=".pak,.zip" className="hidden" onChange={(e) => e.target.files?.[0] && loadFile(e.target.files[0])} />
+        </div>
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <button
+            type="button"
+            disabled={phase === 'loading'}
+            onClick={loadShareware}
+            className="px-4 py-2 rounded bg-amber-700 hover:bg-amber-600 text-amber-50 text-sm disabled:opacity-40"
+          >
+            Download shareware from the Internet Archive
+          </button>
+          <div className="text-xs text-stone-500 max-w-md">
+            Fetches quake106.zip from archive.org, checks its MD5 checksum, and reads pak0.pak from it in your browser. The Internet Archive hosts the file, not this project.
+          </div>
         </div>
         {error && <div className="mt-4 text-red-400 text-sm bg-red-950/40 border border-red-900 rounded p-3">{error}</div>}
         <div className="mt-8 text-xs text-stone-500 leading-relaxed">
