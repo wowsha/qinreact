@@ -30,8 +30,26 @@ const waitForIce = (pc: RTCPeerConnection): Promise<void> =>
     pc.addEventListener('icegatheringstatechange', done);
   });
 
-const encode = (d: RTCSessionDescription) => btoa(JSON.stringify({ type: d.type, sdp: d.sdp }));
-const decode = (code: string): RTCSessionDescriptionInit => JSON.parse(atob(code.trim()));
+// Codes are the SDP, deflated and written as URL-safe base64, to keep them short enough to paste.
+const toB64Url = (u8: Uint8Array): string => {
+  let s = '';
+  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const fromB64Url = (code: string): Uint8Array => {
+  const s = atob(code.replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+};
+const pipe = async (bytes: Uint8Array, t: CompressionStream | DecompressionStream): Promise<Uint8Array> =>
+  new Uint8Array(await new Response(new Blob([bytes as unknown as BlobPart]).stream().pipeThrough(t as any)).arrayBuffer());
+const encode = async (d: RTCSessionDescription): Promise<string> =>
+  toB64Url(await pipe(new TextEncoder().encode(JSON.stringify({ t: d.type, s: d.sdp })), new CompressionStream('deflate-raw')));
+const decode = async (code: string): Promise<RTCSessionDescriptionInit> => {
+  const o = JSON.parse(new TextDecoder().decode(await pipe(fromB64Url(code.trim()), new DecompressionStream('deflate-raw'))));
+  return { type: o.t, sdp: o.s };
+};
 
 export class NetSession {
   role: Role;
@@ -106,13 +124,13 @@ export class NetSession {
   }
   async acceptAnswer(code: string) {
     this.setStatus('Connecting...');
-    await this.pc.setRemoteDescription(decode(code));
+    await this.pc.setRemoteDescription(await decode(code));
   }
 
   // ---- joiner: take the host's invite and create an answer
   async createAnswer(inviteCode: string): Promise<string> {
     this.pc.ondatachannel = (e) => this.attach(e.channel);
-    await this.pc.setRemoteDescription(decode(inviteCode));
+    await this.pc.setRemoteDescription(await decode(inviteCode));
     await this.pc.setLocalDescription(await this.pc.createAnswer());
     await waitForIce(this.pc);
     this.setStatus('Answer ready. Send it back to the host.');
