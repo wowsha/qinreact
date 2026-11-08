@@ -20,7 +20,10 @@ export function CoopPanel({ game, onClose }: { game: Game; onClose: () => void }
     if (role === 'host') {
       s.fullSender = () => game.snapshotRaw();
     } else {
-      s.onFull = (raw) => game.loadRaw(raw);
+      s.onFull = (raw, ent) => {
+        game.loadRaw(raw);
+        game.setViewEnt(ent);
+      };
       s.onDelta = (m) => {
         if (game.sv) applyDelta(game.sv, m);
       };

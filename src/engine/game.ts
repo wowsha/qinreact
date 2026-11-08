@@ -19,6 +19,8 @@ interface Transient { org: number[]; radius: number; die: number; decay: number;
 export class Game {
   assets: Assets;
   rend: GameRenderer;
+  /** The player entity this screen follows (1 unless joined to a co-op host). */
+  viewEnt = 1;
   snd: SoundSystem;
   hud: CanvasRenderingContext2D;
   sv: Server | null = null;
@@ -227,12 +229,12 @@ export class Game {
       this.rend.loadLevel(sv);
       for (const s of sv.statics) this.rend.addStatic(s);
       this.levelReady = true;
-      this.lastHealth = sv.fget(1, 'health');
-      const a = sv.vget(1, 'angles');
+      this.lastHealth = sv.fget(this.viewEnt, 'health');
+      const a = sv.vget(this.viewEnt, 'angles');
       this.viewAngles = [a[0], a[1], 0];
       this.state = 'playing';
       console.log(`[qinreact] loaded map ${map} (${sv.numEdicts} edicts, ${sv.statics.length} static entities, newGame=${newGame})`);
-      this.oldZ = sv.vget(1, 'origin')[2];
+      this.oldZ = sv.vget(this.viewEnt, 'origin')[2];
       this.currentMap = map;
       this.deadAt = 0;
       this.lastAuto = this.now;
@@ -383,10 +385,10 @@ export class Game {
     let count = save * 0.5 + take * 0.5;
     if (count < 10) count = 10;
     this.cshift.dmg = Math.min(150, this.cshift.dmg + 3 * count);
-    const armor = sv.fget(1, 'armorvalue');
+    const armor = sv.fget(this.viewEnt, 'armorvalue');
     this.cshift.dmgColor = save > take && armor > 0 ? [220, 50, 50] : save > 0 ? [220, 50, 50] : [255, 0, 0];
     if (take > 0) this.cshift.dmgColor = [255, 0, 0];
-    const org = sv.vget(1, 'origin');
+    const org = sv.vget(this.viewEnt, 'origin');
     let dx = from[0] - org[0], dy = from[1] - org[1], dz = from[2] - org[2];
     const l = Math.hypot(dx, dy, dz) || 1;
     dx /= l; dy /= l; dz /= l;
@@ -527,7 +529,7 @@ export class Game {
     const sv = this.sv;
     const running = this.state === 'playing' && sv && !this.menu && !this.paused;
     if (this.state === 'playing' && sv && !this.inter && (!this.net || this.net.role === 'host')) {
-      if (sv.fget(1, 'health') <= 0) {
+      if (sv.fget(this.viewEnt, 'health') <= 0) {
         // Dead: after a short pause, any fire, jump or Enter reloads the newest save.
         if (!this.deadAt) this.deadAt = this.now;
         const pressed = (this.mouseButtons & 1) || this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('Space') || this.keys.has('Enter');
@@ -549,6 +551,11 @@ export class Game {
         // A co-op joiner does not simulate: the host's state arrives over the network.
         if (!this.net || this.net.role === 'host') sv.update(dt, cmd);
         if (this.net?.role === 'host') this.net.pump(sv);
+        // The joiner sends its input to the host, which moves this player.
+        if (this.net?.role === 'client') {
+          this.net.sendCmd(cmd);
+          cmd.impulse = 0;
+        }
         this.clientTime += dt;
         if (sv.pendingChange) {
           const map = sv.pendingChange;
@@ -590,7 +597,7 @@ export class Game {
       if (effects & 2) {
         const av = angleVectors(sv.vget(e, 'angles'));
         sv.fset(e, 'effects', effects & ~2); // one-shot: QuakeC never clears it here, so consume it
-        this.trans.push({ org: [org[0] + av.forward[0] * 18, org[1] + av.forward[1] * 18, org[2] + av.forward[2] * 18 + (e === 1 ? 22 : 0)], radius: 200, die: this.now + 100, decay: 0, born: this.now });
+        this.trans.push({ org: [org[0] + av.forward[0] * 18, org[1] + av.forward[1] * 18, org[2] + av.forward[2] * 18 + (e === this.viewEnt ? 22 : 0)], radius: 200, die: this.now + 100, decay: 0, born: this.now });
       }
       if (effects & 4) this.trans.push({ org: org.slice(), radius: 400, die: this.now + 100, decay: 0, born: this.now });
       if (effects & 8) this.trans.push({ org: org.slice(), radius: 200, die: this.now + 100, decay: 0, born: this.now });
@@ -831,7 +838,7 @@ export class Game {
       if (c === -3) blends.push([130, 80, 50, 128]);
       else if (c === -5) blends.push([255, 80, 0, 150]);
       else if (c === -4) blends.push([0, 25, 5, 150]);
-      const items = sv.fget(1, 'items') | 0;
+      const items = sv.fget(this.viewEnt, 'items') | 0;
       if (items & IT.QUAD) blends.push([0, 0, 255, 30]);
       else if (items & IT.SUIT) blends.push([0, 255, 0, 20]);
       else if (items & IT.INVIS) blends.push([100, 100, 100, 100]);
@@ -1062,7 +1069,7 @@ export class Game {
   }
   autosave(): boolean {
     const sv = this.sv;
-    if (!sv || this.state !== 'playing' || this.inter || sv.fget(1, 'health') <= 0) return false;
+    if (!sv || this.state !== 'playing' || this.inter || sv.fget(this.viewEnt, 'health') <= 0) return false;
     this.lastAuto = this.now;
     try {
       const data = this.snapshotRaw();
@@ -1095,6 +1102,11 @@ export class Game {
   loadGame(slot: number) {
     this.loadRaw(this.saves[slot]);
   }
+  /** Co-op: the player entity this screen follows and draws from. */
+  setViewEnt(e: number) {
+    this.viewEnt = e;
+    this.rend.viewEnt = e;
+  }
   loadRaw(raw: string | null) {
     if (!raw) return;
     try {
@@ -1114,7 +1126,7 @@ export class Game {
       this.menu = null;
       this.inter = false;
       this.lastOrigin.clear();
-      const a = this.sv.vget(1, 'v_angle');
+      const a = this.sv.vget(this.viewEnt, 'v_angle');
       this.viewAngles = [a[0], a[1], 0];
       this.resumeGame();
     } catch (e) {

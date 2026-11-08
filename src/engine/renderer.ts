@@ -174,6 +174,8 @@ interface ModelGroup {
 }
 
 export class GameRenderer {
+  /** The entity this screen is looking through; its own model is not drawn. */
+  viewEnt = 1;
   renderer: THREE.WebGLRenderer;
   scene = new THREE.Scene();
   viewScene = new THREE.Scene();
@@ -707,7 +709,7 @@ export class GameRenderer {
           bg.group.position.set(origin[0], origin[1], origin[2]);
           this.setRot(bg.group, angles);
           seenBrush.add(name);
-        } else if (e !== 1 && name.endsWith('.mdl')) {
+        } else if (e !== this.viewEnt && name.endsWith('.mdl')) {
           let v = this.entVis.get(e);
           if (v && v.name !== name) {
             this.root.remove(v.mesh);

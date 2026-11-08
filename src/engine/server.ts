@@ -84,6 +84,14 @@ export class Server {
   sounds: string[] = [];
   lightstyles: string[] = new Array(64).fill('');
   cmd: UserCmd = { forward: 0, side: 0, up: 0, buttons: 0, impulse: 0, angles: [0, 0, 0] };
+  /** Co-op: extra player edicts, mapped to the latest command from their client. */
+  remoteCmds = new Map<number, UserCmd>();
+  isPlayer(e: number): boolean {
+    return e === 1 || this.remoteCmds.has(e);
+  }
+  cmdOf(e: number): UserCmd {
+    return e === 1 ? this.cmd : this.remoteCmds.get(e) ?? this.cmd;
+  }
   spawnParms: number[] = new Array(16).fill(0);
   serverFlags = 0;
   changelevelIssued = false;
@@ -1139,11 +1147,12 @@ export class Server {
   airMove(e: number) {
     const ang = this.vget(e, 'angles');
     const av = angleVectors(ang);
-    let fmove = this.cmd.forward, smove = this.cmd.side;
+    const cmd = this.cmdOf(e);
+    let fmove = cmd.forward, smove = cmd.side;
     if (this.time < this.fget(e, 'teleport_time') && fmove < 0) fmove = 0;
     const wishvel = [0, 0, 0];
     for (let i = 0; i < 3; i++) wishvel[i] = av.forward[i] * fmove + av.right[i] * smove;
-    if (this.fget(e, 'movetype') !== MOVETYPE.WALK) wishvel[2] = this.cmd.up;
+    if (this.fget(e, 'movetype') !== MOVETYPE.WALK) wishvel[2] = cmd.up;
     else wishvel[2] = 0;
     let wishspeed = Math.hypot(wishvel[0], wishvel[1], wishvel[2]);
     const wd = wishspeed ? [wishvel[0] / wishspeed, wishvel[1] / wishspeed, wishvel[2] / wishspeed] : [0, 0, 0];
@@ -1164,10 +1173,11 @@ export class Server {
 
   waterMove(e: number) {
     const av = angleVectors(this.vget(e, 'v_angle'));
+    const cmd = this.cmdOf(e);
     const wishvel = [0, 0, 0];
-    for (let i = 0; i < 3; i++) wishvel[i] = av.forward[i] * this.cmd.forward + av.right[i] * this.cmd.side;
-    if (!this.cmd.forward && !this.cmd.side && !this.cmd.up) wishvel[2] -= 60;
-    else wishvel[2] += this.cmd.up;
+    for (let i = 0; i < 3; i++) wishvel[i] = av.forward[i] * cmd.forward + av.right[i] * cmd.side;
+    if (!cmd.forward && !cmd.side && !cmd.up) wishvel[2] -= 60;
+    else wishvel[2] += cmd.up;
     let wishspeed = Math.hypot(wishvel[0], wishvel[1], wishvel[2]);
     const maxs = this.cv('sv_maxspeed');
     if (wishspeed > maxs) {
@@ -1285,7 +1295,7 @@ export class Server {
     for (let e = 0; e < this.numEdicts; e++) {
       if (this.free[e]) continue;
       if (vm.gF[this.G.force_retouch]) this.linkEdict(e, true);
-      if (e === 1) {
+      if (this.isPlayer(e)) {
         this.physicsClient(e);
         continue;
       }
@@ -1372,39 +1382,67 @@ export class Server {
     });
   }
 
+  /** Co-op: spawn a player entity for a remote client. Returns its edict number. */
+  addRemotePlayer(): number {
+    const vm = this.vm;
+    const e = this.alloc();
+    this.remoteCmds.set(e, { forward: 0, side: 0, up: 0, buttons: 0, impulse: 0, angles: [0, 0, 0] });
+    this.fset(e, 'colormap', e);
+    this.fset(e, 'team', 1);
+    this.iset(e, 'netname', vm.newString('player'));
+    for (let i = 0; i < 16; i++) vm.gF[this.G.parm1 + i] = this.spawnParms[i];
+    this.callGlobalFn('ClientConnect', e);
+    this.callGlobalFn('PutClientInServer', e);
+    return e;
+  }
+
+  /** Co-op: forget a remote player and free its edict. */
+  removeRemotePlayer(e: number) {
+    if (!this.remoteCmds.has(e)) return;
+    this.remoteCmds.delete(e);
+    this.freeEdict(e);
+  }
+
   tick(cmd: UserCmd) {
     this.snapshotPrev();
-    const e = 1;
     this.cmd = cmd;
-    // read client move
-    this.vset(e, 'v_angle', cmd.angles);
-    this.fset(e, 'button0', cmd.buttons & 1);
-    this.fset(e, 'button2', (cmd.buttons & 2) >> 1);
-    this.fset(e, 'button1', (cmd.buttons & 4) >> 2);
-    if (cmd.impulse) {
-      this.fset(e, 'impulse', cmd.impulse);
-      cmd.impulse = 0;
-    }
-    this.clientThink(e);
-    this.physics();
-    // client data: angle fixing and damage
-    if (this.fget(e, 'fixangle')) {
-      const a = this.vget(e, 'angles');
-      this.ev.setAngles?.(a);
-      this.vset(e, 'v_angle', a);
-      this.fset(e, 'fixangle', 0);
-    }
-    const take = this.fget(e, 'dmg_take'), save = this.fget(e, 'dmg_save');
-    if (take || save) {
-      const inf = this.iget(e, 'dmg_inflictor');
-      let from = this.vget(e, 'origin');
-      if (inf) {
-        const o = this.vget(inf, 'origin'), m = this.vget(inf, 'mins'), x = this.vget(inf, 'maxs');
-        from = [o[0] + (m[0] + x[0]) * 0.5, o[1] + (m[1] + x[1]) * 0.5, o[2] + (m[2] + x[2]) * 0.5];
+    // The local player (entity 1) is always first; remote co-op players follow.
+    const players = [1, ...this.remoteCmds.keys()];
+    for (const e of players) {
+      const c = this.cmdOf(e);
+      // read client move
+      this.vset(e, 'v_angle', c.angles);
+      this.fset(e, 'button0', c.buttons & 1);
+      this.fset(e, 'button2', (c.buttons & 2) >> 1);
+      this.fset(e, 'button1', (c.buttons & 4) >> 2);
+      if (c.impulse) {
+        this.fset(e, 'impulse', c.impulse);
+        c.impulse = 0;
       }
-      this.ev.damage?.(save, take, from);
-      this.fset(e, 'dmg_take', 0);
-      this.fset(e, 'dmg_save', 0);
+      this.clientThink(e);
+    }
+    this.physics();
+    for (const e of players) {
+      // client data: angle fixing and damage
+      if (this.fget(e, 'fixangle')) {
+        const a = this.vget(e, 'angles');
+        if (e === 1) this.ev.setAngles?.(a);
+        this.vset(e, 'v_angle', a);
+        this.fset(e, 'fixangle', 0);
+      }
+      const take = this.fget(e, 'dmg_take'), save = this.fget(e, 'dmg_save');
+      if (take || save) {
+        const inf = this.iget(e, 'dmg_inflictor');
+        let from = this.vget(e, 'origin');
+        if (inf) {
+          const o = this.vget(inf, 'origin'), m = this.vget(inf, 'mins'), x = this.vget(inf, 'maxs');
+          from = [o[0] + (m[0] + x[0]) * 0.5, o[1] + (m[1] + x[1]) * 0.5, o[2] + (m[2] + x[2]) * 0.5];
+        }
+        // Only the local player's screen reacts to damage here.
+        if (e === 1) this.ev.damage?.(save, take, from);
+        this.fset(e, 'dmg_take', 0);
+        this.fset(e, 'dmg_save', 0);
+      }
     }
   }
 }

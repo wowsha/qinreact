@@ -41,10 +41,15 @@ export class NetSession {
   status = '';
   /** Host: returns the full state as JSON (the game's save snapshot). */
   fullSender: (() => string) | null = null;
-  /** Joiner: called with the full state, and then with each delta. */
-  onFull: ((raw: string) => void) | null = null;
+  /** Joiner: called with the full state and the joiner's own player entity, then with each delta. */
+  onFull: ((raw: string, ent: number) => void) | null = null;
   onDelta: ((m: any) => void) | null = null;
   onStatus: (() => void) | null = null;
+
+  // host: the joiner's player entity in the current level, and its latest input
+  private remoteEnt = 0;
+  private remoteSv: Server | null = null;
+  private inCmd: any = null;
 
   private needFull = false;
   private lastSv: Server | null = null;
@@ -85,8 +90,9 @@ export class NetSession {
     };
     dc.onmessage = (e) => {
       const m = JSON.parse(e.data);
-      if (m.k === 'full') this.onFull?.(m.raw);
+      if (m.k === 'full') this.onFull?.(m.raw, m.ent);
       else if (m.k === 'd') this.onDelta?.(m);
+      else if (m.k === 'cmd') this.inCmd = m.c;
     };
   }
 
@@ -114,6 +120,10 @@ export class NetSession {
   }
 
   close() {
+    if (this.role === 'host' && this.remoteSv && this.remoteEnt) this.remoteSv.removeRemotePlayer(this.remoteEnt);
+    this.remoteEnt = 0;
+    this.remoteSv = null;
+    this.inCmd = null;
     this.open = false;
     this.dc?.close();
     this.pc.close();
@@ -123,16 +133,29 @@ export class NetSession {
     if (this.open && this.dc?.readyState === 'open') this.dc.send(JSON.stringify(m));
   }
 
+  // ---- joiner: send this frame's input to the host
+  sendCmd(c: { forward: number; side: number; up: number; buttons: number; impulse: number; angles: number[] }) {
+    this.send({ k: 'cmd', c: { forward: c.forward, side: c.side, up: c.up, buttons: c.buttons, impulse: c.impulse, angles: [c.angles[0], c.angles[1], c.angles[2]] } });
+  }
+
   // ---- host: called after each simulation step
   pump(sv: Server) {
     if (this.role !== 'host' || !this.open || !this.fullSender) return;
+    // A new level gets a new player entity for the joiner.
+    if (sv !== this.remoteSv) {
+      this.remoteSv = sv;
+      this.remoteEnt = sv.addRemotePlayer();
+      this.needFull = true;
+    }
+    // Input from the joiner drives their player entity from the next tick.
+    if (this.inCmd) sv.remoteCmds.set(this.remoteEnt, this.inCmd);
     const now = performance.now();
     if (!this.needFull && now - this.lastPump < PUMP_MS) return;
     this.lastPump = now;
 
     if (this.needFull || sv !== this.lastSv || sv.mapName !== this.lastMap) {
       this.needFull = false;
-      this.send({ k: 'full', raw: this.fullSender() });
+      this.send({ k: 'full', raw: this.fullSender(), ent: this.remoteEnt });
       this.lastSv = sv;
       this.lastMap = sv.mapName;
       this.lastEv = Int32Array.from(sv.vm.evI);
