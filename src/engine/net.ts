@@ -1,60 +1,29 @@
+import Peer, { type DataConnection, type PeerOptions } from 'peerjs';
 import type { Server } from './server';
 
-// Peer-to-peer co-op over WebRTC. The host runs the simulation and streams its entity
-// memory to the joiner as deltas: only the words that changed since the last update.
-// Connection codes are copied by hand, so no signalling server is needed.
-// Peers only exchange local (host) addresses, so this works on the same network.
-// Set iceServers to a STUN server to connect across different networks.
+// Peer-to-peer co-op. The host runs the simulation and streams its entity memory to the
+// joiner as deltas: only the words that changed since the last update. The two browsers
+// find each other through a PeerJS signalling broker, so the invite can be one link.
+// Game data then flows directly between the browsers over WebRTC.
 
 export type Role = 'host' | 'client';
 
-const RTC_CONFIG: RTCConfiguration = { iceServers: [] };
 const PUMP_MS = 50;
 
-// Wait for ICE gathering to finish so the code carries every candidate. Some browsers
-// never report 'complete' (gathering can stall), so give up after a short wait and
-// send whatever candidates were found.
-const ICE_WAIT_MS = 3000;
-const waitForIce = (pc: RTCPeerConnection): Promise<void> =>
-  new Promise((resolve) => {
-    if (pc.iceGatheringState === 'complete') return resolve();
-    const finish = () => {
-      clearTimeout(timer);
-      pc.removeEventListener('icegatheringstatechange', done);
-      resolve();
-    };
-    const done = () => {
-      if (pc.iceGatheringState === 'complete') finish();
-    };
-    const timer = setTimeout(finish, ICE_WAIT_MS);
-    pc.addEventListener('icegatheringstatechange', done);
-  });
+// Signalling broker. The public PeerJS cloud is used unless a build sets VITE_PEER_HOST
+// (for example a local PeerServer for testing).
+const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env;
+const PEER_OPTIONS: PeerOptions = env.VITE_PEER_HOST
+  ? { host: env.VITE_PEER_HOST, port: Number(env.VITE_PEER_PORT ?? 9000), path: '/', secure: env.VITE_PEER_SECURE === 'true' }
+  : {};
 
-// Codes are the SDP, deflated and written as URL-safe base64, to keep them short enough to paste.
-const toB64Url = (u8: Uint8Array): string => {
-  let s = '';
-  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-};
-const fromB64Url = (code: string): Uint8Array => {
-  const s = atob(code.replace(/-/g, '+').replace(/_/g, '/'));
-  const out = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
-  return out;
-};
-const pipe = async (bytes: Uint8Array, t: CompressionStream | DecompressionStream): Promise<Uint8Array> =>
-  new Uint8Array(await new Response(new Blob([bytes as unknown as BlobPart]).stream().pipeThrough(t as any)).arrayBuffer());
-const encode = async (d: RTCSessionDescription): Promise<string> =>
-  toB64Url(await pipe(new TextEncoder().encode(JSON.stringify({ t: d.type, s: d.sdp })), new CompressionStream('deflate-raw')));
-const decode = async (code: string): Promise<RTCSessionDescriptionInit> => {
-  const o = JSON.parse(new TextDecoder().decode(await pipe(fromB64Url(code.trim()), new DecompressionStream('deflate-raw'))));
-  return { type: o.t, sdp: o.s };
-};
+// Invite ids are short and random. Knowing the id is enough to join, so share it only with the friend.
+const newInviteId = () => 'qr-' + Math.random().toString(36).slice(2, 12);
 
 export class NetSession {
   role: Role;
-  pc: RTCPeerConnection;
-  dc: RTCDataChannel | null = null;
+  peer: Peer | null = null;
+  conn: DataConnection | null = null;
   open = false;
   status = '';
   /** Host: returns the full state as JSON (the game's save snapshot). */
@@ -81,13 +50,6 @@ export class NetSession {
 
   constructor(role: Role) {
     this.role = role;
-    this.pc = new RTCPeerConnection(RTC_CONFIG);
-    this.pc.onconnectionstatechange = () => {
-      if (['failed', 'disconnected', 'closed'].includes(this.pc.connectionState)) {
-        this.open = false;
-        this.setStatus('Connection lost');
-      }
-    };
   }
 
   private setStatus(s: string) {
@@ -95,46 +57,63 @@ export class NetSession {
     this.onStatus?.();
   }
 
-  private attach(dc: RTCDataChannel) {
-    this.dc = dc;
-    dc.onopen = () => {
+  private attach(conn: DataConnection) {
+    this.conn = conn;
+    conn.on('open', () => {
       this.open = true;
       this.setStatus('Connected');
       if (this.role === 'host') this.needFull = true;
-    };
-    dc.onclose = () => {
+    });
+    conn.on('close', () => {
       this.open = false;
       this.setStatus('Disconnected');
-    };
-    dc.onmessage = (e) => {
-      const m = JSON.parse(e.data);
+    });
+    conn.on('error', () => this.setStatus('Connection error'));
+    conn.on('data', (data) => {
+      const m = data as any;
       if (m.k === 'full') this.onFull?.(m.raw, m.ent);
       else if (m.k === 'd') this.onDelta?.(m);
       else if (m.k === 'cmd') this.inCmd = m.c;
-    };
+    });
+    if (conn.open) {
+      this.open = true;
+      this.setStatus('Connected');
+    }
   }
 
-  // ---- host: create an invite, then accept the joiner's answer
+  private openPeer(id?: string): Promise<Peer> {
+    return new Promise((resolve, reject) => {
+      const peer = id ? new Peer(id, PEER_OPTIONS) : new Peer(PEER_OPTIONS);
+      this.peer = peer;
+      peer.on('open', () => resolve(peer));
+      peer.on('error', (err) => {
+        this.setStatus(`Could not reach the matchmaking server (${err.type}).`);
+        reject(err);
+      });
+    });
+  }
+
+  // ---- host: create an invite. The returned id goes into the invite link.
   async createInvite(): Promise<string> {
-    this.attach(this.pc.createDataChannel('qinreact'));
-    await this.pc.setLocalDescription(await this.pc.createOffer());
-    await waitForIce(this.pc);
-    this.setStatus('Invite ready. Send it to your friend, then paste their answer.');
-    return encode(this.pc.localDescription!);
-  }
-  async acceptAnswer(code: string) {
-    this.setStatus('Connecting...');
-    await this.pc.setRemoteDescription(await decode(code));
+    const id = newInviteId();
+    const peer = await this.openPeer(id);
+    peer.on('connection', (conn) => {
+      // One friend at a time.
+      if (this.conn && this.conn.open) {
+        conn.close();
+        return;
+      }
+      this.attach(conn);
+    });
+    this.setStatus('Invite ready. Send the link to your friend.');
+    return id;
   }
 
-  // ---- joiner: take the host's invite and create an answer
-  async createAnswer(inviteCode: string): Promise<string> {
-    this.pc.ondatachannel = (e) => this.attach(e.channel);
-    await this.pc.setRemoteDescription(await decode(inviteCode));
-    await this.pc.setLocalDescription(await this.pc.createAnswer());
-    await waitForIce(this.pc);
-    this.setStatus('Answer ready. Send it back to the host.');
-    return encode(this.pc.localDescription!);
+  // ---- joiner: connect to the host's invite id
+  async join(inviteId: string): Promise<void> {
+    await this.openPeer();
+    this.setStatus('Connecting...');
+    this.attach(this.peer!.connect(inviteId, { reliable: true }));
   }
 
   close() {
@@ -143,12 +122,14 @@ export class NetSession {
     this.remoteSv = null;
     this.inCmd = null;
     this.open = false;
-    this.dc?.close();
-    this.pc.close();
+    this.conn?.close();
+    this.peer?.destroy();
+    this.peer = null;
+    this.conn = null;
   }
 
   private send(m: unknown) {
-    if (this.open && this.dc?.readyState === 'open') this.dc.send(JSON.stringify(m));
+    if (this.open && this.conn?.open) this.conn.send(m);
   }
 
   // ---- joiner: send this frame's input to the host
