@@ -619,7 +619,8 @@ export class Game {
 
   private renderWorld(dt: number, running: boolean) {
     const sv = this.sv!;
-    const e = 1;
+    // The camera follows this screen's player (entity 1 for the host, the joiner's own player otherwise).
+    const e = this.viewEnt;
     const org = sv.vget(e, 'origin');
     const vo = sv.vget(e, 'view_ofs');
     const vel = sv.vget(e, 'velocity');
@@ -747,7 +748,7 @@ export class Game {
 
   private drawMinimalHud() {
     const sv = this.sv!;
-    const e = 1;
+    const e = this.viewEnt;
     const items = sv.fget(e, 'items') | 0;
     const health = sv.fget(e, 'health') | 0;
     const armor = sv.fget(e, 'armorvalue') | 0;
@@ -780,7 +781,7 @@ export class Game {
 
   private drawStatusBar() {
     const sv = this.sv!;
-    const e = 1;
+    const e = this.viewEnt;
     const items = sv.fget(e, 'items') | 0;
     const health = sv.fget(e, 'health') | 0;
     const armor = sv.fget(e, 'armorvalue') | 0;
