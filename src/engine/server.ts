@@ -1363,6 +1363,8 @@ export class Server {
   }
   /** Co-op joiner: positions arrive as updates, so blend between the last two. */
   netMode = false;
+  /** Demo playback: the blend position between the previous and the current record (0..1), or null. */
+  netAlpha: number | null = null;
   netAt = 0;
   /** Co-op joiner: call just before applying each update, to keep the previous positions. */
   netSnapshot() {
@@ -1370,6 +1372,7 @@ export class Server {
   }
   /** Fraction (0..1) of the current physics tick that has already elapsed. */
   alpha(): number {
+    if (this.netAlpha !== null) return this.netAlpha;
     if (this.netMode) return Math.min(1, Math.max(0, (performance.now() - this.netAt) / 50));
     return Math.min(1, Math.max(0, this.accum / TICK));
   }

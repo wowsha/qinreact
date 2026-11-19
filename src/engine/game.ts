@@ -15,6 +15,7 @@ const RAMP2 = [0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66];
 const RAMP3 = [0x6d, 0x6b, 6, 5, 4, 3];
 const rnd = (n: number) => Math.random() * n;
 const DEMO_FILES = ['demo1.dem', 'demo2.dem', 'demo3.dem']; // the shareware demos in pak0.pak
+const DEMO_BRIGHTNESS = 1.6; // the shareware levels are dark; brighten them behind the menu
 const CON_COLS = 38; // characters per console line (8 px each in the 320-wide space)
 const CON_LINES = 11;
 const CON_HEIGHT = 112; // console height in the 320x200 virtual space
@@ -126,8 +127,13 @@ export class Game {
       localStorage.setItem('quakejs.opts', JSON.stringify({ sens: this.sens, alwaysRun: this.alwaysRun, invert: this.invertMouse, vol: this.snd.volume, bright: this.brightness, hud: this.hudStyle }));
     } catch { /* ignore */ }
   }
+  /** The demo background is brightened so the level is visible behind the menu. */
+  setDemoMode(on: boolean) {
+    this.demoMode = on;
+    this.applyBrightness();
+  }
   applyBrightness() {
-    this.glCanvas.style.filter = `brightness(${this.brightness})`;
+    this.glCanvas.style.filter = `brightness(${this.brightness * (this.demoMode ? DEMO_BRIGHTNESS : 1)})`;
   }
 
   // ------------------------------------------------------------ lifecycle
@@ -214,7 +220,7 @@ export class Game {
 
   newGame() {
     this.menu = null;
-    this.demoMode = false;
+    this.setDemoMode(false);
     this.paused = false;
     this.sv = this.makeServer();
     this.sv.serverFlags = 0;
@@ -284,7 +290,7 @@ export class Game {
       const name = DEMO_FILES[this.demoIdx];
       const buf = this.assets.pak.getBuffer(name);
       if (!buf) throw new Error(`${name} is not in the PAK`);
-      this.demoMode = true;
+      this.setDemoMode(true);
       this.menu = 'main';
       this.state = 'title';
       this.sv = this.makeServer();
@@ -318,7 +324,7 @@ export class Game {
     }
   }
   stopDemo() {
-    this.demoMode = false;
+    this.setDemoMode(false);
     this.demo = null;
     this.sv = null;
     this.levelReady = false;
@@ -436,7 +442,7 @@ export class Game {
         if (inGame) {
           this.queueLevel(name, false);
         } else {
-          this.demoMode = false;
+          this.setDemoMode(false);
           this.demo = null;
           this.sv = this.makeServer();
           this.sv.serverFlags = 0;
@@ -1418,7 +1424,7 @@ export class Game {
   }
   loadRaw(raw: string | null) {
     if (!raw) return;
-    this.demoMode = false;
+    this.setDemoMode(false);
     try {
       const snap = JSON.parse(raw);
       this.currentMap = snap.mapName ?? this.currentMap;
@@ -1460,7 +1466,7 @@ export class Game {
     const ctx = this.hud;
     const page = this.menu ?? 'main';
     if (this.state === 'playing' || this.demoMode) {
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillStyle = this.demoMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.5)';
       ctx.fillRect(0, 0, this.W, this.H);
     }
     const dot = () => (Math.floor(this.now / 100) % 6) + 1;

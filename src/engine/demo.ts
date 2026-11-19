@@ -266,7 +266,7 @@ export interface DemoSink {
 /** Plays parsed records against a Server: the world, entity state and the view. */
 export class DemoPlayer {
   private recs: DemoRecord[];
-  private next = 0;
+  private cur = -1; // index of the record the server currently holds
   private clock = 0;
   private worldLoaded = false;
   private ents = new Map<number, EntState>();
@@ -353,9 +353,9 @@ export class DemoPlayer {
     sv.fset(e, 'flags', ((sv.fget(e, 'flags') | 0) & ~512) | (c.onGround ? 512 : 0));
   }
 
-  private apply(rec: DemoRecord, t: number): boolean {
+  private apply(rec: DemoRecord): boolean {
     const sv = this.sv;
-    sv.time = t;
+    sv.time = rec.time;
     for (const op of rec.ops) {
       switch (op.k) {
         case 'serverinfo': break; // the world was loaded by loadWorld()
@@ -394,20 +394,37 @@ export class DemoPlayer {
     return true;
   }
 
-  /** Advance playback by dt seconds. Returns false when the demo has ended. */
+  /**
+   * Advance playback by dt seconds. Returns false when the demo has ended.
+   * The server holds the record after the render time and keeps the one before it as a
+   * snapshot, so positions and view angles blend smoothly between the two.
+   */
   advance(dt: number): boolean {
     if (!this.worldLoaded) return false;
     this.clock += dt;
-    let applied = 0;
-    while (this.next < this.recs.length && this.recs[this.next].time <= this.clock && applied < 8) {
-      const rec = this.recs[this.next++];
-      this.sink.view(rec.angles);
-      this.sv.netSnapshot();
-      this.sv.netMode = true;
-      this.sv.netAt = performance.now();
-      if (!this.apply(rec, rec.time)) return false;
-      applied++;
+    const R = this.clock;
+    const recs = this.recs;
+    if (this.cur < 0) {
+      this.cur = 0;
+      this.apply(recs[0]);
     }
-    return this.next < this.recs.length;
+    while (this.cur + 1 < recs.length && recs[this.cur].time <= R) {
+      this.cur++;
+      this.sv.netSnapshot();
+      if (!this.apply(recs[this.cur])) return false;
+    }
+    if (this.cur === recs.length - 1 && R >= recs[this.cur].time) return false;
+    const a = this.cur > 0 ? recs[this.cur - 1] : recs[this.cur];
+    const b = recs[this.cur];
+    const span = b.time - a.time;
+    const t = span > 0 ? Math.min(1, Math.max(0, (R - a.time) / span)) : 1;
+    this.sv.netMode = true;
+    this.sv.netAlpha = t;
+    const ang = [0, 1, 2].map((i) => {
+      const d = ((((b.angles[i] - a.angles[i]) % 360) + 540) % 360) - 180; // shortest way round
+      return a.angles[i] + d * t;
+    });
+    this.sink.view(ang);
+    return true;
   }
 }
