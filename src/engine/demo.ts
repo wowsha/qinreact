@@ -354,8 +354,6 @@ export class DemoPlayer {
   }
 
   private apply(rec: DemoRecord): boolean {
-    const sv = this.sv;
-    sv.time = rec.time;
     for (const op of rec.ops) {
       switch (op.k) {
         case 'serverinfo': break; // the world was loaded by loadWorld()
@@ -395,6 +393,23 @@ export class DemoPlayer {
   }
 
   /**
+   * Apply records up to the first player position, so the camera never shows the origin.
+   * Call after the renderer has the level.
+   */
+  prime(): void {
+    const recs = this.recs;
+    let k = 0;
+    while (k < recs.length - 1 && !recs[k].ops.some((o) => o.k === 'upd' && o.e === 1 && o.o.some((v) => v !== undefined))) k++;
+    for (let i = 0; i <= k; i++) {
+      if (i > 0) this.sv.netSnapshot();
+      this.apply(recs[i]);
+    }
+    this.cur = k;
+    this.clock = recs[Math.max(0, k - 1)].time;
+    this.sv.time = recs[k].time;
+  }
+
+  /**
    * Advance playback by dt seconds. Returns false when the demo has ended.
    * The server holds the record after the render time and keeps the one before it as a
    * snapshot, so positions and view angles blend smoothly between the two.
@@ -404,6 +419,8 @@ export class DemoPlayer {
     this.clock += dt;
     const R = this.clock;
     const recs = this.recs;
+    // the game's clock runs on the demo clock, not the 13 Hz record times
+    this.sv.time = R;
     if (this.cur < 0) {
       this.cur = 0;
       this.apply(recs[0]);

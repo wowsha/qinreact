@@ -315,6 +315,7 @@ export class Game {
       this.demo = new DemoPlayer(sv, sink, buf);
       this.demo.loadWorld();
       this.rend.loadLevel(sv);
+      this.demo.prime();
       this.levelReady = true;
       this.currentMap = sv.mapName;
       console.log(`[qinreact] demo ${name} on ${sv.mapName} (${this.demo.records} records)`);
@@ -982,9 +983,10 @@ export class Game {
     const wm = sv.vm.str(sv.iget(e, 'weaponmodel'));
     if (wm && !this.inter && health > 0 && !(items & IT.INVIS)) {
       const av = angleVectors([ang[0], ang[1], 0]);
-      // Gun sways forward/back along the view direction (Ironwail-style), not up/down.
+      // The gun follows the camera's bob, so it does not bounce up and down on screen.
+      // It only sways forward and back along the view direction.
       const sway = bob * 0.6;
-      const wo = [eye[0] - 1 / 32 + av.forward[0] * sway, eye[1] - 1 / 32 + av.forward[1] * sway, eye[2] - bob - 1 / 32 + 1];
+      const wo = [eye[0] - 1 / 32 + av.forward[0] * sway, eye[1] - 1 / 32 + av.forward[1] * sway, eye[2] - 1 / 32 + 1];
       weapon = { model: wm, frame: sv.fget(e, 'weaponframe'), origin: [wo[0], wo[1], wo[2]], angles: [-ang[0], ang[1], 0] };
     }
     this.rend.render(sv, { origin: eye, angles: ang, time, dt: running ? dt : 0, dlights: lights, weapon, drawWorld: true, hideEntities: false });
