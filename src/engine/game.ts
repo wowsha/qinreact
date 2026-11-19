@@ -3,7 +3,8 @@ import { NetSession } from './net';
 import { Assets } from './assets';
 import { GameRenderer, DLight, Particle } from './renderer';
 import { SoundSystem } from './sound';
-import { Server, UserCmd, angleVectors, calcRoll, MOVETYPE, FL, MOVE_NORMAL } from './server';
+import { Server, UserCmd, angleVectors, calcRoll, MOVETYPE, FL } from './server';
+import { DemoPlayer, DemoSink } from './demo';
 
 type MenuPage = 'main' | 'single' | 'options' | 'help' | 'quit' | 'multi' | 'saveload' | null;
 type State = 'title' | 'loading' | 'playing' | 'finale';
@@ -13,7 +14,7 @@ const RAMP1 = [0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61];
 const RAMP2 = [0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66];
 const RAMP3 = [0x6d, 0x6b, 6, 5, 4, 3];
 const rnd = (n: number) => Math.random() * n;
-const DEMO_MAPS = ['e1m1', 'e1m2', 'e1m3', 'e1m4', 'e1m5', 'e1m6', 'e1m7', 'e1m8'];
+const DEMO_FILES = ['demo1.dem', 'demo2.dem', 'demo3.dem']; // the shareware demos in pak0.pak
 const CON_COLS = 38; // characters per console line (8 px each in the 320-wide space)
 const CON_LINES = 11;
 const CON_HEIGHT = 112; // console height in the 320x200 virtual space
@@ -74,15 +75,10 @@ export class Game {
   finaleText = '';
   finaleStart = 0;
   con: { text: string; time: number }[] = [];
-  // demo (attract) mode: a bot plays a shareware level behind the title menu
+  // menu background: a shareware demo (demo1-3.dem) played back behind the title menu
   demoMode = false;
-  demoMapIdx = 0;
-  demoT = 0;
-  demoYaw = 0;
-  demoTurnLeft = 0;
-  demoTurnRate = 0;
-  demoBlocked = false;
-  demoCmd: UserCmd = { forward: 0, side: 0, up: 0, buttons: 0, impulse: 0, angles: [0, 0, 0] };
+  demoIdx = 0;
+  demo: DemoPlayer | null = null;
   // console, opened with the backquote key
   consoleOpen = false;
   conInput = '';
@@ -281,20 +277,41 @@ export class Game {
     }
   }
 
-  // ------------------------------------------------------------ demo (attract) mode
-  /** The attract loop: a bot walks a shareware level behind the title menu. */
+  // ------------------------------------------------------------ demo playback (title background)
+  /** Play the next shareware demo behind the title menu. */
   startDemo() {
     try {
+      const name = DEMO_FILES[this.demoIdx];
+      const buf = this.assets.pak.getBuffer(name);
+      if (!buf) throw new Error(`${name} is not in the PAK`);
       this.demoMode = true;
-      this.demoT = 0;
-      this.demoTurnLeft = 0;
-      this.demoTurnRate = 0;
-      this.demoBlocked = false;
-      this.demoYaw = Math.random() * 360;
       this.menu = 'main';
+      this.state = 'title';
       this.sv = this.makeServer();
       this.sv.serverFlags = 0;
-      this.startLevel(DEMO_MAPS[this.demoMapIdx], true, true);
+      const sv = this.sv;
+      const sink: DemoSink = {
+        print: (s) => this.conPrint(s),
+        centerprint: (s) => {
+          this.center = { text: s, until: this.now + 2000 };
+        },
+        lightstyle: (i, s) => this.rend.setLightstyle(i, s),
+        particle: (org, dir, color, count) => (count >= 255 ? this.particleExplosion(org) : this.runParticles(org, dir, color, count)),
+        temp: (t, a) => this.tempEntity(t, a),
+        staticEntity: (st) => {
+          sv.statics.push(st);
+          this.rend.addStatic(st);
+        },
+        view: (a) => {
+          this.viewAngles = [a[0], a[1], 0];
+        },
+      };
+      this.demo = new DemoPlayer(sv, sink, buf);
+      this.demo.loadWorld();
+      this.rend.loadLevel(sv);
+      this.levelReady = true;
+      this.currentMap = sv.mapName;
+      console.log(`[qinreact] demo ${name} on ${sv.mapName} (${this.demo.records} records)`);
     } catch (e) {
       console.error('[qinreact] demo failed to start', e);
       this.stopDemo();
@@ -302,6 +319,7 @@ export class Game {
   }
   stopDemo() {
     this.demoMode = false;
+    this.demo = null;
     this.sv = null;
     this.levelReady = false;
     this.state = 'title';
@@ -309,53 +327,11 @@ export class Game {
     this.snd.stopAll();
   }
   private nextDemo() {
-    this.demoMapIdx = (this.demoMapIdx + 1) % DEMO_MAPS.length;
+    this.demoIdx = (this.demoIdx + 1) % DEMO_FILES.length;
     this.startDemo();
   }
   private stepDemo(dt: number) {
-    const sv = this.sv!;
-    const e = this.viewEnt;
-    this.demoT += dt;
-    if (this.demoT > 40 || this.inter || sv.pendingChange) {
-      this.nextDemo();
-      return;
-    }
-    // the bot never dies, so the death and reload path in frame() never runs for it
-    sv.fset(e, 'flags', (sv.fget(e, 'flags') | 0) | FL.GODMODE);
-    const org = sv.vget(e, 'origin'), vo = sv.vget(e, 'view_ofs');
-    const eye = [org[0] + vo[0], org[1] + vo[1], org[2] + vo[2]];
-    // true when a short probe in direction yawOff from the eye reaches no wall
-    const clear = (yawOff: number) => {
-      const av = angleVectors([0, this.demoYaw + yawOff, 0]);
-      const end = [eye[0] + av.forward[0] * 96, eye[1] + av.forward[1] * 96, eye[2] + av.forward[2] * 96];
-      return sv.move(eye, [0, 0, 0], [0, 0, 0], end, MOVE_NORMAL, e).fraction >= 1;
-    };
-    if (this.demoTurnLeft > 0) {
-      this.demoTurnLeft -= dt;
-      this.demoYaw += this.demoTurnRate * dt;
-    }
-    if (!(this.demoBlocked && this.demoTurnLeft > 0) && !(clear(0) && clear(-35) && clear(35))) {
-      // a wall ahead: turn away for about half a second
-      this.demoBlocked = true;
-      this.demoTurnRate = (Math.random() < 0.5 ? -1 : 1) * 240;
-      this.demoTurnLeft = 0.5 + Math.random() * 0.5;
-    } else if (this.demoTurnLeft <= 0 && Math.random() < dt * 0.2) {
-      // otherwise wander with a slow random turn now and then
-      this.demoBlocked = false;
-      this.demoTurnRate = (Math.random() < 0.5 ? -1 : 1) * 60;
-      this.demoTurnLeft = 1 + Math.random();
-    }
-    this.demoYaw = ((this.demoYaw % 360) + 360) % 360;
-    const c = this.demoCmd;
-    c.forward = this.demoBlocked && this.demoTurnLeft > 0 ? 0 : 300;
-    c.side = 0;
-    c.up = 0;
-    c.impulse = 0;
-    c.buttons = this.demoT % 6 < 0.5 ? 1 : 0; // fire now and then
-    c.angles = [0, this.demoYaw, 0];
-    this.viewAngles = [0, this.demoYaw, 0];
-    sv.update(dt, c);
-    this.entityEffects();
+    if (!this.demo || !this.demo.advance(dt)) this.nextDemo();
   }
 
   // ------------------------------------------------------------ console
@@ -461,6 +437,7 @@ export class Game {
           this.queueLevel(name, false);
         } else {
           this.demoMode = false;
+          this.demo = null;
           this.sv = this.makeServer();
           this.sv.serverFlags = 0;
           this.queueLevel(name, true);
@@ -806,7 +783,9 @@ export class Game {
   tempEntity(type: number, a: number[]) {
     const sv = this.sv!;
     const pos = [a[0], a[1], a[2]];
-    const snd = (name: string) => this.snd.play(-1, 0, name, 255, 1, pos);
+    const snd = (name: string) => {
+      if (!this.demoMode) this.snd.play(-1, 0, name, 255, 1, pos);
+    };
     switch (type) {
       case 0: case 1: case 2: {
         this.runParticles(pos, [0, 0, 0], 0, type === 0 ? 10 : 20);
