@@ -3,7 +3,8 @@ import { NetSession } from './net';
 import { Assets } from './assets';
 import { GameRenderer, DLight, Particle } from './renderer';
 import { SoundSystem } from './sound';
-import { Server, UserCmd, angleVectors, calcRoll } from './server';
+import { Server, UserCmd, angleVectors, calcRoll, MOVETYPE, FL } from './server';
+import { DemoPlayer, DemoSink } from './demo';
 
 type MenuPage = 'main' | 'single' | 'options' | 'help' | 'quit' | 'multi' | 'saveload' | null;
 type State = 'title' | 'loading' | 'playing' | 'finale';
@@ -13,6 +14,12 @@ const RAMP1 = [0x6f, 0x6d, 0x6b, 0x69, 0x67, 0x65, 0x63, 0x61];
 const RAMP2 = [0x6f, 0x6e, 0x6d, 0x6c, 0x6b, 0x6a, 0x68, 0x66];
 const RAMP3 = [0x6d, 0x6b, 6, 5, 4, 3];
 const rnd = (n: number) => Math.random() * n;
+const DEMO_FILES = ['demo1.dem', 'demo2.dem', 'demo3.dem']; // the shareware demos in pak0.pak
+const CON_COLS = 38; // characters per console line (8 px each in the 320-wide space)
+const CON_LINES = 11;
+const CON_HEIGHT = 112; // console height in the 320x200 virtual space
+const WEAPON_BITS = 4096 | 1 | 2 | 4 | 8 | 16 | 32 | 64; // axe and the seven guns
+const AMMO_BITS = 256 | 512 | 1024 | 2048; // shells, nails, rockets, cells
 
 interface Transient { org: number[]; radius: number; die: number; decay: number; born: number }
 
@@ -68,6 +75,16 @@ export class Game {
   finaleText = '';
   finaleStart = 0;
   con: { text: string; time: number }[] = [];
+  // menu background: a shareware demo (demo1-3.dem) played back behind the title menu
+  demoMode = false;
+  demoIdx = 0;
+  demo: DemoPlayer | null = null;
+  // console, opened with the backquote key
+  consoleOpen = false;
+  conInput = '';
+  conLog: string[] = [];
+  conHist: string[] = [];
+  conHistIdx = -1;
   conLine = '';
   center = { text: '', until: 0 };
   ambientQueue: { org: number[]; name: string; vol: number; attn: number }[] = [];
@@ -121,6 +138,7 @@ export class Game {
       this.frame(t);
     };
     this.raf = requestAnimationFrame(loop);
+    this.startDemo();
   }
   destroy() {
     cancelAnimationFrame(this.raf);
@@ -149,11 +167,13 @@ export class Game {
   private wire(sv: Server) {
     sv.ev = {
       sound: (e, ch, name, vol, attn, org) => {
+        if (this.demoMode) return;
         // Item pickups play items/*.wav; log them so pickups show in the console.
         if (name.startsWith('items/')) console.log(`[qinreact] pickup sound ${name}`);
         this.snd.play(e, ch, name, vol, attn, org);
       },
       ambient: (org, name, vol, attn) => {
+        if (this.demoMode) return;
         this.ambientQueue.push({ org, name, vol, attn });
       },
       print: (s) => this.conPrint(s),
@@ -194,6 +214,7 @@ export class Game {
 
   newGame() {
     this.menu = null;
+    this.demoMode = false;
     this.paused = false;
     this.sv = this.makeServer();
     this.sv.serverFlags = 0;
@@ -206,7 +227,7 @@ export class Game {
     this.queued = { map, newGame, wait: 2 };
   }
 
-  startLevel(map: string, newGame: boolean) {
+  startLevel(map: string, newGame: boolean, demo = false) {
     const sv = this.sv!;
     this.state = 'loading';
     this.conLine = '';
@@ -232,17 +253,21 @@ export class Game {
       this.lastHealth = sv.fget(this.viewEnt, 'health');
       const a = sv.vget(this.viewEnt, 'angles');
       this.viewAngles = [a[0], a[1], 0];
-      this.state = 'playing';
+      this.state = demo ? 'title' : 'playing';
       console.log(`[qinreact] loaded map ${map} (${sv.numEdicts} edicts, ${sv.statics.length} static entities, newGame=${newGame})`);
       this.oldZ = sv.vget(this.viewEnt, 'origin')[2];
       this.currentMap = map;
       this.deadAt = 0;
       this.lastAuto = this.now;
-      this.autosave();
+      if (!demo) this.autosave();
       this.onStatus('');
     } catch (e) {
       console.error('[qinreact] failed to load map', map, e);
       this.conPrint('\x01Could not load map ' + map + ': ' + (e as Error).message + '\n');
+      if (demo) {
+        this.stopDemo();
+        return;
+      }
       if (map !== 'start') {
         this.startLevel('start', true);
       } else {
@@ -252,10 +277,279 @@ export class Game {
     }
   }
 
+  // ------------------------------------------------------------ demo playback (title background)
+  /** Play the next shareware demo behind the title menu. */
+  startDemo() {
+    try {
+      const name = DEMO_FILES[this.demoIdx];
+      const buf = this.assets.pak.getBuffer(name);
+      if (!buf) throw new Error(`${name} is not in the PAK`);
+      this.demoMode = true;
+      this.menu = 'main';
+      this.state = 'title';
+      this.sv = this.makeServer();
+      this.sv.serverFlags = 0;
+      const sv = this.sv;
+      const sink: DemoSink = {
+        print: (s) => this.conPrint(s),
+        centerprint: (s) => {
+          this.center = { text: s, until: this.now + 2000 };
+        },
+        lightstyle: (i, s) => this.rend.setLightstyle(i, s),
+        particle: (org, dir, color, count) => (count >= 255 ? this.particleExplosion(org) : this.runParticles(org, dir, color, count)),
+        temp: (t, a) => this.tempEntity(t, a),
+        staticEntity: (st) => {
+          sv.statics.push(st);
+          this.rend.addStatic(st);
+        },
+        view: (a) => {
+          this.viewAngles = [a[0], a[1], 0];
+        },
+      };
+      this.demo = new DemoPlayer(sv, sink, buf);
+      this.demo.loadWorld();
+      this.rend.loadLevel(sv);
+      this.levelReady = true;
+      this.currentMap = sv.mapName;
+      console.log(`[qinreact] demo ${name} on ${sv.mapName} (${this.demo.records} records)`);
+    } catch (e) {
+      console.error('[qinreact] demo failed to start', e);
+      this.stopDemo();
+    }
+  }
+  stopDemo() {
+    this.demoMode = false;
+    this.demo = null;
+    this.sv = null;
+    this.levelReady = false;
+    this.state = 'title';
+    this.menu = 'main';
+    this.snd.stopAll();
+  }
+  private nextDemo() {
+    this.demoIdx = (this.demoIdx + 1) % DEMO_FILES.length;
+    this.startDemo();
+  }
+  private stepDemo(dt: number) {
+    if (!this.demo || !this.demo.advance(dt)) this.nextDemo();
+  }
+
+  // ------------------------------------------------------------ console
+  toggleConsole() {
+    this.consoleOpen = !this.consoleOpen;
+    this.conHistIdx = -1;
+    this.keys.clear();
+    this.mouseButtons = 0;
+    if (this.consoleOpen) {
+      if (document.pointerLockElement) document.exitPointerLock();
+    } else {
+      this.resumeGame();
+    }
+  }
+  /** Add text to the console log, wrapped to the console width. */
+  logCon(text: string) {
+    const clean = text.replace(/[\x00-\x08\x0b-\x1f]/g, '').replace(/\r/g, '');
+    for (const line of clean.split('\n')) {
+      if (!line.length) this.conLog.push('');
+      for (let i = 0; i < line.length; i += CON_COLS) this.conLog.push(line.slice(i, i + CON_COLS));
+    }
+    if (this.conLog.length > 200) this.conLog.splice(0, this.conLog.length - 200);
+  }
+  private consoleKey(ev: KeyboardEvent) {
+    switch (ev.code) {
+      case 'Enter':
+      case 'NumpadEnter': {
+        const line = this.conInput.trim();
+        this.conInput = '';
+        this.conHistIdx = -1;
+        this.logCon('] ' + line);
+        if (line) {
+          this.conHist.push(line);
+          if (this.conHist.length > 50) this.conHist.shift();
+          this.execConsole(line);
+        }
+        return;
+      }
+      case 'Escape':
+        this.toggleConsole();
+        return;
+      case 'Backspace':
+        this.conInput = this.conInput.slice(0, -1);
+        return;
+      case 'ArrowUp':
+        if (this.conHist.length) {
+          this.conHistIdx = this.conHistIdx < 0 ? this.conHist.length - 1 : Math.max(0, this.conHistIdx - 1);
+          this.conInput = this.conHist[this.conHistIdx];
+        }
+        return;
+      case 'ArrowDown':
+        if (this.conHistIdx >= 0) {
+          this.conHistIdx++;
+          if (this.conHistIdx < this.conHist.length) {
+            this.conInput = this.conHist[this.conHistIdx];
+          } else {
+            this.conHistIdx = -1;
+            this.conInput = '';
+          }
+        }
+        return;
+    }
+    if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey && this.conInput.length < 80) this.conInput += ev.key;
+  }
+  private execConsole(line: string) {
+    const t = line.split(/\s+/);
+    const cmd = t[0].toLowerCase();
+    const arg = t.slice(1);
+    const sv = this.sv;
+    const inGame = this.state === 'playing' && !!sv && !this.demoMode;
+    const e = this.viewEnt;
+    // player commands need a running game
+    const needGame = (): boolean => {
+      if (!inGame) this.logCon('Start a game first (New Game).');
+      return !inGame;
+    };
+    switch (cmd) {
+      case 'help':
+        this.logCon('commands: map noclip god notarget give impulse kill pos stats clear echo version quit');
+        return;
+      case 'clear':
+        this.conLog = [];
+        return;
+      case 'echo':
+        this.logCon(arg.join(' '));
+        return;
+      case 'version':
+        this.logCon('qinreact console. Game data is read from your pak0.pak.');
+        return;
+      case 'map': {
+        const name = (arg[0] ?? '').toLowerCase();
+        if (!name) {
+          this.logCon('usage: map <level>, for example: map e1m1');
+          return;
+        }
+        if (!this.assets.pak.getBuffer(`maps/${name}.bsp`)) {
+          this.logCon(`map ${name} is not in the PAK`);
+          return;
+        }
+        this.menu = null;
+        this.paused = false;
+        if (inGame) {
+          this.queueLevel(name, false);
+        } else {
+          this.demoMode = false;
+          this.demo = null;
+          this.sv = this.makeServer();
+          this.sv.serverFlags = 0;
+          this.queueLevel(name, true);
+        }
+        return;
+      }
+      case 'noclip': {
+        if (needGame()) return;
+        const on = sv!.fget(e, 'movetype') !== MOVETYPE.NOCLIP;
+        sv!.fset(e, 'movetype', on ? MOVETYPE.NOCLIP : MOVETYPE.WALK);
+        this.logCon(`noclip ${on ? 'ON' : 'OFF'}`);
+        return;
+      }
+      case 'god':
+      case 'notarget': {
+        if (needGame()) return;
+        const bit = cmd === 'god' ? FL.GODMODE : FL.NOTARGET;
+        const flags = sv!.fget(e, 'flags') | 0;
+        const on = !(flags & bit);
+        sv!.fset(e, 'flags', on ? flags | bit : flags & ~bit);
+        this.logCon(`${cmd === 'god' ? 'godmode' : 'notarget'} ${on ? 'ON' : 'OFF'}`);
+        return;
+      }
+      case 'give': {
+        if (needGame()) return;
+        const what = (arg[0] ?? '').toLowerCase();
+        if (!['all', 'health', 'armor', 'ammo', 'weapons'].includes(what)) {
+          this.logCon('usage: give all | health | armor | ammo | weapons');
+          return;
+        }
+        const s = sv!;
+        const want = (w: string) => what === w || what === 'all';
+        if (want('health')) s.fset(e, 'health', 100);
+        if (want('armor')) {
+          s.fset(e, 'armorvalue', 200);
+          s.fset(e, 'armortype', 0.8);
+          s.fset(e, 'items', ((s.fget(e, 'items') | 0) & ~(IT.ARMOR1 | IT.ARMOR2 | IT.ARMOR3)) | IT.ARMOR3);
+        }
+        if (want('ammo')) {
+          s.fset(e, 'ammo_shells', 100);
+          s.fset(e, 'ammo_nails', 200);
+          s.fset(e, 'ammo_rockets', 50);
+          s.fset(e, 'ammo_cells', 150);
+          s.fset(e, 'items', (s.fget(e, 'items') | 0) | AMMO_BITS);
+        }
+        if (want('weapons')) s.fset(e, 'items', (s.fget(e, 'items') | 0) | WEAPON_BITS);
+        this.logCon(`gave ${what}`);
+        return;
+      }
+      case 'impulse': {
+        if (needGame()) return;
+        const n = parseInt(arg[0] ?? '', 10);
+        if (!Number.isFinite(n)) {
+          this.logCon('usage: impulse <number>');
+          return;
+        }
+        this.cmd.impulse = n;
+        return;
+      }
+      case 'kill':
+        if (needGame()) return;
+        sv!.callGlobalFn('ClientKill', e);
+        return;
+      case 'pos': {
+        if (needGame()) return;
+        const o = sv!.vget(e, 'origin'), a = sv!.vget(e, 'v_angle');
+        this.logCon(`origin ${o.map((v) => v.toFixed(1)).join(' ')}  angles ${a[0].toFixed(1)} ${a[1].toFixed(1)}`);
+        return;
+      }
+      case 'stats': {
+        if (needGame()) return;
+        const s = sv!;
+        this.logCon(`map ${this.currentMap}  health ${s.fget(e, 'health') | 0}  armor ${s.fget(e, 'armorvalue') | 0}  ammo ${s.fget(e, 'currentammo') | 0}`);
+        return;
+      }
+      case 'quit':
+        this.consoleOpen = false;
+        this.menu = 'quit';
+        return;
+      default:
+        this.logCon(`unknown command "${cmd}" (type help)`);
+    }
+  }
+  private drawConsole() {
+    const ctx = this.hud, S = this.S;
+    const x0 = this.ox(), y0 = this.oy();
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(x0, y0, 320 * S, CON_HEIGHT * S);
+    const bg = this.assets.canvas('gfx/conback.lmp');
+    if (bg) {
+      ctx.globalAlpha = 0.6;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(bg, 0, 0, bg.width, bg.height * (CON_HEIGHT / 200), x0, y0, 320 * S, CON_HEIGHT * S);
+      ctx.globalAlpha = 1;
+    }
+    this.conLog.slice(-CON_LINES).forEach((l, i) => this.text(l, 4, 2 + i * 8));
+    const cursor = Math.floor(this.now / 250) & 1 ? '_' : ' ';
+    this.text('] ' + this.conInput.slice(-(CON_COLS - 3)) + cursor, 4, CON_HEIGHT - 10);
+  }
+
   // ------------------------------------------------------------ input
   onKeyDown(ev: KeyboardEvent): boolean {
     this.snd.resume();
     const k = ev.code;
+    if (k === 'Backquote') {
+      if (!ev.repeat) this.toggleConsole();
+      return true;
+    }
+    if (this.consoleOpen) {
+      this.consoleKey(ev);
+      return !ev.ctrlKey && !ev.metaKey;
+    }
     if (this.menu || this.state === 'title') {
       this.menuKey(ev);
       return true;
@@ -283,7 +577,7 @@ export class Game {
   }
   onMouseMove(dx: number, dy: number) {
     if (!this.touchMode && document.pointerLockElement !== this.glCanvas && document.pointerLockElement !== this.hudCanvas) return;
-    if (this.menu || this.state !== 'playing' || this.paused) return;
+    if (this.menu || this.state !== 'playing' || this.paused || this.consoleOpen) return;
     const s = this.sens * 0.022;
     this.viewAngles[1] -= dx * s;
     this.viewAngles[0] += dy * s * (this.invertMouse ? -1 : 1);
@@ -315,7 +609,7 @@ export class Game {
   }
   onPointerLockChange() {
     if (this.touchMode) return;
-    if (!document.pointerLockElement && this.state === 'playing' && !this.menu && !this.inter) {
+    if (!document.pointerLockElement && this.state === 'playing' && !this.menu && !this.inter && !this.consoleOpen) {
       this.menu = 'main';
     }
   }
@@ -328,6 +622,8 @@ export class Game {
     this.snd.stopAll();
     this.inter = false;
     this.paused = false;
+    this.consoleOpen = false;
+    this.startDemo();
   }
 
   buildCmd(): UserCmd {
@@ -365,6 +661,7 @@ export class Game {
     if (this.conLine.trim()) {
       console.log(`[qinreact] ${this.conLine.trim()}`);
       this.con.push({ text: this.conLine, time: this.now });
+      this.logCon(this.conLine);
       if (this.con.length > 40) this.con.shift();
     }
     this.conLine = '';
@@ -486,7 +783,9 @@ export class Game {
   tempEntity(type: number, a: number[]) {
     const sv = this.sv!;
     const pos = [a[0], a[1], a[2]];
-    const snd = (name: string) => this.snd.play(-1, 0, name, 255, 1, pos);
+    const snd = (name: string) => {
+      if (!this.demoMode) this.snd.play(-1, 0, name, 255, 1, pos);
+    };
     switch (type) {
       case 0: case 1: case 2: {
         this.runParticles(pos, [0, 0, 0], 0, type === 0 ? 10 : 20);
@@ -527,7 +826,7 @@ export class Game {
       return;
     }
     const sv = this.sv;
-    const running = this.state === 'playing' && sv && !this.menu && !this.paused;
+    const running = this.state === 'playing' && sv && !this.menu && !this.paused && !this.consoleOpen;
     if (this.state === 'playing' && sv && !this.inter && (!this.net || this.net.role === 'host')) {
       if (sv.fget(this.viewEnt, 'health') <= 0) {
         // Singleplayer: after a short pause, any fire, jump or Enter reloads the newest save.
@@ -571,6 +870,10 @@ export class Game {
         this.entityEffects();
       }
       this.renderWorld(dt, !!running);
+    } else if (this.demoMode && this.sv) {
+      this.stepDemo(dt);
+      this.hud.clearRect(0, 0, this.W, this.H);
+      if (this.demoMode && this.sv) this.renderWorld(dt, true);
     } else {
       this.hud.clearRect(0, 0, this.W, this.H);
       this.rend.renderer.clear(true, true, true);
@@ -894,7 +1197,7 @@ export class Game {
       ctx.fillRect(0, 0, this.W, this.H);
       const w = this.picW('gfx/loading.lmp'), h = this.picH('gfx/loading.lmp');
       this.pic('gfx/loading.lmp', (320 - w) / 2, (200 - 48 - h) / 2);
-    } else if (this.state === 'title') {
+    } else if (this.state === 'title' && !this.demoMode) {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, this.W, this.H);
       const c = this.assets.canvas('gfx/conback.lmp');
@@ -920,6 +1223,7 @@ export class Game {
       if (this.now - this.finaleStart > 1500) this.textC('Press Space to continue', 188);
     }
     if (this.menu || this.state === 'title') this.drawMenu();
+    if (this.consoleOpen) this.drawConsole();
     void S;
   }
 
@@ -1114,6 +1418,7 @@ export class Game {
   }
   loadRaw(raw: string | null) {
     if (!raw) return;
+    this.demoMode = false;
     try {
       const snap = JSON.parse(raw);
       this.currentMap = snap.mapName ?? this.currentMap;
@@ -1154,7 +1459,7 @@ export class Game {
   private drawMenu() {
     const ctx = this.hud;
     const page = this.menu ?? 'main';
-    if (this.state === 'playing') {
+    if (this.state === 'playing' || this.demoMode) {
       ctx.fillStyle = 'rgba(0,0,0,0.5)';
       ctx.fillRect(0, 0, this.W, this.H);
     }
