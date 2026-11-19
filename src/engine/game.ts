@@ -1069,6 +1069,18 @@ export class Game {
       ctx.drawImage(c, (code & 15) * 8, (code >> 4) * 8, 8, 8, px + i * 8 * S, py, 8 * S, 8 * S);
     }
   }
+  /** Menu-sized text: glyphs drawn k times larger, to match the carved menu labels. */
+  private textBig(s: string, x: number, y: number, k = 2, bronze = false) {
+    const c = this.assets.conchars;
+    if (!c) return;
+    const S = this.S;
+    const ctx = this.hud;
+    ctx.imageSmoothingEnabled = false;
+    for (let i = 0; i < s.length; i++) {
+      const code = (s.charCodeAt(i) & 255) + (bronze ? 128 : 0);
+      ctx.drawImage(c, (code & 15) * 8, (code >> 4) * 8, 8, 8, this.ox() + (x + i * 8 * k) * S, this.oy() + y * S, 8 * k * S, 8 * k * S);
+    }
+  }
   private textC(s: string, y: number, bronze = false) {
     this.text(s, 160 - s.length * 4, y, bronze);
   }
@@ -1533,29 +1545,32 @@ export class Game {
         title('gfx/ttl_sgl.lmp');
         this.pic('gfx/sp_menu.lmp', 72, 32);
         this.pic(`gfx/menudot${dot()}.lmp`, 54, 32 + this.menuCursor.single * 20);
-        this.text('Levels', 96, 32 + 3 * 20, true);
+        this.textBig('Levels', 96, 32 + 3 * 20, 2, true);
         break;
       case 'levels': {
         title('gfx/ttl_sgl.lmp');
         const n = this.levelOpts.length;
         const cursor = this.menuCursor.levels;
-        if (n === 0) this.textC('No levels found in PAK', 96, true);
-        const rows = 17;
-        const top = Math.max(0, Math.min(cursor - 8, n - rows));
+        if (n === 0) this.textBig('No levels found in PAK', 8, 96, 1, true);
+        const rows = 10;
+        const top = Math.max(0, Math.min(cursor - 5, n - rows));
         for (let i = top; i < Math.min(n, top + rows); i++) {
           const [name, label] = this.levelOpts[i];
-          this.text(`${name} - ${label}`, 24, 28 + (i - top) * 8, true);
+          const y = 28 + (i - top) * 16;
+          this.textBig(name, 24, y, 2, true);
+          this.text(label, 96, y + 6, true);
         }
-        if (n > 0) this.ch(12 + (Math.floor(this.now / 250) & 1), 8, 28 + (cursor - top) * 8);
+        if (n > 0) this.textBig(String.fromCharCode(12 + (Math.floor(this.now / 250) & 1)), 8, 28 + (cursor - top) * 16, 2);
         break;
       }
       case 'difficulty': {
         title('gfx/ttl_sgl.lmp');
         const [, label] = LEVEL_LIST.find(([n]) => n === this.pickedLevel) ?? [this.pickedLevel ?? '', ''];
-        this.textC(`${this.pickedLevel ?? ''} ${label}`, 40, true);
-        this.textC('Select difficulty', 52, true);
-        SKILL_NAMES.forEach((name, i) => this.text(name, 96, 76 + i * 20, true));
-        this.ch(12 + (Math.floor(this.now / 250) & 1), 72, 76 + this.menuCursor.difficulty * 20);
+        this.textBig(this.pickedLevel ?? '', 24, 36, 2, true);
+        this.text(label, 24, 54, true);
+        this.textBig('Select difficulty', 24, 68, 2, true);
+        SKILL_NAMES.forEach((name, i) => this.textBig(name, 96, 96 + i * 20, 2, true));
+        this.textBig(String.fromCharCode(12 + (Math.floor(this.now / 250) & 1)), 72, 96 + this.menuCursor.difficulty * 20, 2);
         break;
       }
       case 'saveload': {
