@@ -66,9 +66,14 @@ export function TouchControls({ game }: { game: Game }) {
       for (const t of Array.from(e.changedTouches)) {
         const z = zoneOf(t.target);
         if (z === 'stick' && !stick.current) stick.current = { id: t.identifier, ox: t.clientX, oy: t.clientY, held: new Set() };
-        else if (z === 'look' && !look.current) look.current = { id: t.identifier, x: t.clientX, y: t.clientY };
+        else if (z === 'look') look.current = { id: t.identifier, x: t.clientX, y: t.clientY };
         else if (z && taps[z]) taps[z]();
-        else if (z && holdsDef[z]) { holds.current.set(t.identifier, z); holdsDef[z].down(); }
+        else if (z && holdsDef[z]) {
+          holds.current.set(t.identifier, z);
+          holdsDef[z].down();
+          // the finger holding fire can also turn the camera, while it is held
+          if (!look.current) look.current = { id: t.identifier, x: t.clientX, y: t.clientY };
+        }
       }
     };
     const onMove = (e: TouchEvent) => {
