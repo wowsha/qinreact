@@ -1272,6 +1272,7 @@ export class Server {
         break;
       case MOVETYPE.NOCLIP: {
         if (!this.runThink(e)) return;
+        this.airMove(e); // noclip flight: velocity comes from the player's input
         const o = this.vget(e, 'origin'), v = this.vget(e, 'velocity');
         this.vset(e, 'origin', [o[0] + this.frametime * v[0], o[1] + this.frametime * v[1], o[2] + this.frametime * v[2]]);
         break;

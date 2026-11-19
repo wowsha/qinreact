@@ -13,6 +13,8 @@ No existing engine, port or game engine is used. React is the app shell, and Thr
 - Two HUDs: a minimal Ironwail-style HUD (the default) and the classic status bar, selectable in Options.
 - Drop the PAK onto the page, or click to choose it. The file is parsed in the browser and never uploaded.
 - Console log in the browser's developer tools shows map loads, pickups, centre prints and messages (`[qinreact]` prefix).
+- In-game console (press `` ` ``) with `noclip`, `god`, `notarget`, `give`, `map`, `impulse`, `kill`, `pos`, `stats`, `clear`, `echo` and `help`. Type `help` in the console for the list.
+- The title menu is no longer a static picture: a bot plays through the shareware levels (E1M1 to E1M8) behind the menu, using the real engine and QuakeC.
 
 ## Screenshots
 
@@ -38,6 +40,7 @@ Open the page and drag `id1/pak0.pak` (the 18.7 MB shareware file) onto it, or c
 | Fire / Jump | Left mouse or Ctrl / Space or right mouse |
 | Weapons | 1–8, mouse wheel |
 | Pause / Menu | P / Esc |
+| Console | `` ` `` (backquote) |
 
 The menus are the original ones: Single Player (New Game, Load, Save), Options, Help pages and Quit. Multiplayer is shown as unavailable. Options includes **HUD Style**: `minimal` (an Ironwail-style HUD, the default) or `classic` (the original status bar, with an opaque background). The choice is saved in the browser.
 
@@ -64,7 +67,7 @@ npx tsx scripts/check.ts   /path/to/pak0.pak         # BSP/MDL sanity checks
 ```
 
 ## Known limitations
-- No CD music, demos or sprites (the explosion is particles plus a dynamic light). Multiplayer is not implemented.
+- No CD music, recorded demo playback or sprites (the explosion is particles plus a dynamic light). The menu demo is a bot, not a `.dem` replay. Multiplayer is not implemented.
 - Rotating brush entities collide as axis-aligned boxes.
 - Lightmap brightness has a 1.5× gain applied to approximate the original look. Adjust it in `renderer.ts` (`WORLD_FS`).
 - The sandbox where this was built had no GPU. Rendering was checked with software WebGL in headless Chromium, and a real-GPU test would still be useful.
