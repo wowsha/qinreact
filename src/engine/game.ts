@@ -1069,6 +1069,28 @@ export class Game {
       ctx.drawImage(c, (code & 15) * 8, (code >> 4) * 8, 8, 8, px + i * 8 * S, py, 8 * S, 8 * S);
     }
   }
+  /** Carved-look menu text: bronze gradient with a dark outline and shadow (approximates the picture labels). */
+  private carved(s: string, x: number, y: number, px = 16) {
+    const ctx = this.hud;
+    const S = this.S;
+    const gx = this.ox() + x * S;
+    const gy = this.oy() + y * S;
+    ctx.save();
+    ctx.font = `bold ${px * S}px Georgia, "Times New Roman", serif`;
+    ctx.textBaseline = 'top';
+    const grad = ctx.createLinearGradient(0, gy, 0, gy + px * S);
+    grad.addColorStop(0, '#e8a866');
+    grad.addColorStop(0.5, '#b0743a');
+    grad.addColorStop(1, '#6a3c18');
+    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowOffsetY = Math.max(1, S);
+    ctx.lineWidth = Math.max(1, S * 0.9);
+    ctx.strokeStyle = '#24130a';
+    ctx.strokeText(s, gx, gy);
+    ctx.fillStyle = grad;
+    ctx.fillText(s, gx, gy);
+    ctx.restore();
+  }
   /** Menu-sized text: glyphs drawn k times larger, to match the carved menu labels. */
   private textBig(s: string, x: number, y: number, k = 2, bronze = false) {
     const c = this.assets.conchars;
@@ -1545,20 +1567,20 @@ export class Game {
         title('gfx/ttl_sgl.lmp');
         this.pic('gfx/sp_menu.lmp', 72, 32);
         this.pic(`gfx/menudot${dot()}.lmp`, 54, 32 + this.menuCursor.single * 20);
-        this.textBig('Levels', 96, 32 + 3 * 20, 2, true);
+        this.carved('Levels', 96, 32 + 3 * 20, 16);
         break;
       case 'levels': {
         title('gfx/ttl_sgl.lmp');
         const n = this.levelOpts.length;
         const cursor = this.menuCursor.levels;
-        if (n === 0) this.textBig('No levels found in PAK', 8, 96, 1, true);
+        if (n === 0) this.carved('No levels found in PAK', 8, 96, 12);
         const rows = 10;
         const top = Math.max(0, Math.min(cursor - 5, n - rows));
         for (let i = top; i < Math.min(n, top + rows); i++) {
           const [name, label] = this.levelOpts[i];
           const y = 28 + (i - top) * 16;
-          this.textBig(name, 24, y, 2, true);
-          this.text(label, 96, y + 6, true);
+          this.carved(name, 24, y, 16);
+          this.carved(label, 96, y + 3, 11);
         }
         if (n > 0) this.textBig(String.fromCharCode(12 + (Math.floor(this.now / 250) & 1)), 8, 28 + (cursor - top) * 16, 2);
         break;
@@ -1566,10 +1588,10 @@ export class Game {
       case 'difficulty': {
         title('gfx/ttl_sgl.lmp');
         const [, label] = LEVEL_LIST.find(([n]) => n === this.pickedLevel) ?? [this.pickedLevel ?? '', ''];
-        this.textBig(this.pickedLevel ?? '', 24, 36, 2, true);
-        this.text(label, 24, 54, true);
-        this.textBig('Select difficulty', 24, 68, 2, true);
-        SKILL_NAMES.forEach((name, i) => this.textBig(name, 96, 96 + i * 20, 2, true));
+        this.carved(this.pickedLevel ?? '', 24, 36, 16);
+        this.carved(label, 24, 56, 11);
+        this.carved('Select difficulty', 24, 70, 16);
+        SKILL_NAMES.forEach((name, i) => this.carved(name, 96, 96 + i * 20, 16));
         this.textBig(String.fromCharCode(12 + (Math.floor(this.now / 250) & 1)), 72, 96 + this.menuCursor.difficulty * 20, 2);
         break;
       }
