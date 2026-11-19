@@ -1069,8 +1069,8 @@ export class Game {
       ctx.drawImage(c, (code & 15) * 8, (code >> 4) * 8, 8, 8, px + i * 8 * S, py, 8 * S, 8 * S);
     }
   }
-  private textC(s: string, y: number) {
-    this.text(s, 160 - s.length * 4, y);
+  private textC(s: string, y: number, bronze = false) {
+    this.text(s, 160 - s.length * 4, y, bronze);
   }
 
   private drawNum(x: number, y: number, num: number, digits: number, red: boolean) {
@@ -1533,18 +1533,18 @@ export class Game {
         title('gfx/ttl_sgl.lmp');
         this.pic('gfx/sp_menu.lmp', 72, 32);
         this.pic(`gfx/menudot${dot()}.lmp`, 54, 32 + this.menuCursor.single * 20);
-        this.text('Levels', 96, 32 + 3 * 20);
+        this.text('Levels', 96, 32 + 3 * 20, true);
         break;
       case 'levels': {
         title('gfx/ttl_sgl.lmp');
         const n = this.levelOpts.length;
         const cursor = this.menuCursor.levels;
-        if (n === 0) this.textC('No levels found in PAK', 96);
+        if (n === 0) this.textC('No levels found in PAK', 96, true);
         const rows = 17;
         const top = Math.max(0, Math.min(cursor - 8, n - rows));
         for (let i = top; i < Math.min(n, top + rows); i++) {
           const [name, label] = this.levelOpts[i];
-          this.text(`${name} - ${label}`, 24, 28 + (i - top) * 8);
+          this.text(`${name} - ${label}`, 24, 28 + (i - top) * 8, true);
         }
         if (n > 0) this.ch(12 + (Math.floor(this.now / 250) & 1), 8, 28 + (cursor - top) * 8);
         break;
@@ -1552,9 +1552,9 @@ export class Game {
       case 'difficulty': {
         title('gfx/ttl_sgl.lmp');
         const [, label] = LEVEL_LIST.find(([n]) => n === this.pickedLevel) ?? [this.pickedLevel ?? '', ''];
-        this.textC(`${this.pickedLevel ?? ''} ${label}`, 40);
-        this.textC('Select difficulty', 52);
-        SKILL_NAMES.forEach((name, i) => this.text(name, 96, 76 + i * 20));
+        this.textC(`${this.pickedLevel ?? ''} ${label}`, 40, true);
+        this.textC('Select difficulty', 52, true);
+        SKILL_NAMES.forEach((name, i) => this.text(name, 96, 76 + i * 20, true));
         this.ch(12 + (Math.floor(this.now / 250) & 1), 72, 76 + this.menuCursor.difficulty * 20);
         break;
       }
