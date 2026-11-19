@@ -314,6 +314,7 @@ export class Server {
     this.gset('deathmatch', this.cv('deathmatch'));
     this.gset('coop', this.cv('coop'));
     this.gset('teamplay', this.cv('teamplay'));
+    if (this.G.skill !== undefined) this.gset('skill', this.cv('skill'));
     this.gset('serverflags', this.serverFlags);
     this.gseti('world', 0);
     // world entity

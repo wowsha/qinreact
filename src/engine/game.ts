@@ -6,7 +6,20 @@ import { SoundSystem } from './sound';
 import { Server, UserCmd, angleVectors, calcRoll, MOVETYPE, FL } from './server';
 import { DemoPlayer, DemoSink } from './demo';
 
-type MenuPage = 'main' | 'single' | 'options' | 'help' | 'quit' | 'multi' | 'saveload' | null;
+type MenuPage = 'main' | 'single' | 'levels' | 'difficulty' | 'options' | 'help' | 'quit' | 'multi' | 'saveload' | null;
+
+// Episode maps the Levels picker offers (shown only when the PAK contains them).
+const LEVEL_LIST: [string, string][] = [
+  ['e1m1', 'Slipgate Complex'], ['e1m2', 'Castle of the Damned'], ['e1m3', 'The Necropolis'], ['e1m4', 'The Grisly Grotto'],
+  ['e1m5', 'Gloom Keep'], ['e1m6', 'The Door To Chthon'], ['e1m7', 'The House of Chthon'], ['e1m8', 'Ziggurat Vertigo'],
+  ['e2m1', 'The Installation'], ['e2m2', 'Ogre Citadel'], ['e2m3', 'Crypt of Decay'], ['e2m4', 'The Ebon Fortress'],
+  ['e2m5', 'The Wizard\'s Manse'], ['e2m6', 'The Dismal Oubliette'], ['e2m7', 'Underearth'],
+  ['e3m1', 'Termination Central'], ['e3m2', 'The Vaults of Zin'], ['e3m3', 'The Tomb of Terror'], ['e3m4', 'Satan\'s Dark Delight'],
+  ['e3m5', 'Wind Tunnels'], ['e3m6', 'Chambers of Torment'], ['e3m7', 'The Haunted Halls'],
+  ['e4m1', 'The Sewage System'], ['e4m2', 'The Tower of Despair'], ['e4m3', 'The Elder God Shrine'], ['e4m4', 'The Palace of Hate'],
+  ['e4m5', 'Hell\'s Atrium'], ['e4m6', 'The Pain Maze'], ['e4m7', 'Azure Agony'], ['e4m8', 'Nameless City'],
+];
+const SKILL_NAMES = ['Easy', 'Normal', 'Hard', 'Nightmare'];
 type State = 'title' | 'loading' | 'playing' | 'finale';
 
 const IT = { SHOTGUN: 1, SSHOTGUN: 2, NAILGUN: 4, SNAILGUN: 8, GLAUNCHER: 16, RLAUNCHER: 32, LIGHTNING: 64, SHELLS: 256, NAILS: 512, ROCKETS: 1024, CELLS: 2048, ARMOR1: 8192, ARMOR2: 16384, ARMOR3: 32768, INVIS: 524288, INVULN: 1048576, SUIT: 2097152, QUAD: 4194304 };
@@ -34,7 +47,10 @@ export class Game {
   sv: Server | null = null;
   state: State = 'title';
   menu: MenuPage = 'main';
-  menuCursor: Record<string, number> = { main: 0, single: 0, options: 1, saveload: 0 };
+  menuCursor: Record<string, number> = { main: 0, single: 0, levels: 0, difficulty: 1, options: 1, saveload: 0 };
+  /** Levels available in the picker (filtered to the PAK) and the level chosen for the difficulty page. */
+  levelOpts: [string, string][] = [];
+  pickedLevel: string | null = null;
   helpPage = 0;
   menuMsg = '';
   menuMsgUntil = 0;
@@ -225,6 +241,17 @@ export class Game {
     this.sv = this.makeServer();
     this.sv.serverFlags = 0;
     this.queueLevel('start', true);
+  }
+
+  /** Start a fresh game at a chosen map on a chosen skill (0 Easy .. 3 Nightmare). */
+  startChosenLevel(map: string, skill: number) {
+    this.menu = null;
+    this.setDemoMode(false);
+    this.paused = false;
+    this.sv = this.makeServer();
+    this.sv.serverFlags = 0;
+    this.sv.cvars.skill = skill;
+    this.queueLevel(map, true);
   }
 
   /** Show the loading plaque for a frame, then load. */
@@ -1296,14 +1323,34 @@ export class Game {
         break;
       case 'single':
         if (k === 'Escape') return back('main');
-        cur('single', 3);
+        cur('single', 4);
         if (enter) {
           if (this.menuCursor.single === 0) this.newGame();
-          else {
+          else if (this.menuCursor.single === 3) {
+            this.levelOpts = LEVEL_LIST.filter(([n]) => !!this.assets.pak.getBuffer(`maps/${n}.bsp`));
+            this.menuCursor.levels = 0;
+            this.menu = 'levels';
+          } else {
             this.menuCursor.saveload = 0;
             this.menu = 'saveload';
           }
         }
+        break;
+      case 'levels': {
+        if (k === 'Escape') return back('single');
+        const n = this.levelOpts.length;
+        if (n > 0) cur('levels', n);
+        if (enter && n > 0) {
+          this.pickedLevel = this.levelOpts[this.menuCursor.levels][0];
+          this.menuCursor.difficulty = 1;
+          this.menu = 'difficulty';
+        }
+        break;
+      }
+      case 'difficulty':
+        if (k === 'Escape') return back('levels');
+        cur('difficulty', 4);
+        if (enter && this.pickedLevel) this.startChosenLevel(this.pickedLevel, this.menuCursor.difficulty);
         break;
       case 'saveload': {
         if (k === 'Escape') return back('single');
@@ -1484,7 +1531,31 @@ export class Game {
         title('gfx/ttl_sgl.lmp');
         this.pic('gfx/sp_menu.lmp', 72, 32);
         this.pic(`gfx/menudot${dot()}.lmp`, 54, 32 + this.menuCursor.single * 20);
+        this.text('Levels', 96, 32 + 3 * 20);
         break;
+      case 'levels': {
+        title('gfx/ttl_sgl.lmp');
+        const n = this.levelOpts.length;
+        const cursor = this.menuCursor.levels;
+        if (n === 0) this.textC('No levels found in PAK', 96);
+        const rows = 17;
+        const top = Math.max(0, Math.min(cursor - 8, n - rows));
+        for (let i = top; i < Math.min(n, top + rows); i++) {
+          const [name, label] = this.levelOpts[i];
+          this.text(`${name} - ${label}`, 24, 28 + (i - top) * 8);
+        }
+        if (n > 0) this.ch(12 + (Math.floor(this.now / 250) & 1), 8, 28 + (cursor - top) * 8);
+        break;
+      }
+      case 'difficulty': {
+        title('gfx/ttl_sgl.lmp');
+        const [, label] = LEVEL_LIST.find(([n]) => n === this.pickedLevel) ?? [this.pickedLevel ?? '', ''];
+        this.textC(`${this.pickedLevel ?? ''} ${label}`, 40);
+        this.textC('Select difficulty', 52);
+        SKILL_NAMES.forEach((name, i) => this.text(name, 96, 76 + i * 20));
+        this.ch(12 + (Math.floor(this.now / 250) & 1), 72, 76 + this.menuCursor.difficulty * 20);
+        break;
+      }
       case 'saveload': {
         const saving = this.menuCursor.single === 2;
         title(saving ? 'gfx/p_save.lmp' : 'gfx/p_load.lmp');
