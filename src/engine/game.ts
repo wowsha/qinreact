@@ -157,6 +157,7 @@ export class Game {
   }
 
   // ------------------------------------------------------------ lifecycle
+  private hiddenTimer: ReturnType<typeof setInterval> | null = null;
   start() {
     this.last = performance.now();
     const loop = (t: number) => {
@@ -164,9 +165,16 @@ export class Game {
       this.frame(t);
     };
     this.raf = requestAnimationFrame(loop);
+    // Browsers stop requestAnimationFrame in background tabs, which would freeze the game (and a co-op host).
+    // While the page is hidden, a timer drives the frames instead.
+    this.hiddenTimer = setInterval(() => {
+      if (document.hidden) this.frame(performance.now());
+    }, 1000 / 30);
     this.startDemo();
   }
   destroy() {
+    if (this.hiddenTimer !== null) clearInterval(this.hiddenTimer);
+    this.hiddenTimer = null;
     cancelAnimationFrame(this.raf);
     this.snd.stopAll();
     this.net?.close();
@@ -675,7 +683,8 @@ export class Game {
   }
   onPointerLockChange() {
     if (this.touchMode) return;
-    if (!document.pointerLockElement && this.state === 'playing' && !this.menu && !this.inter && !this.consoleOpen && !this.panelOpen) {
+    if (!document.pointerLockElement && this.state === 'playing' && !this.menu && !this.inter && !this.consoleOpen && !this.panelOpen && !this.net) {
+      // (In co-op the game keeps running: a menu here would freeze the friend too.)
       this.menu = 'main';
     }
   }
