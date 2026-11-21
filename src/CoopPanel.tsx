@@ -24,8 +24,9 @@ export function CoopPanel({ game, onClose, invite }: { game: Game; onClose: () =
       s.fullSender = () => game.snapshotRaw();
     } else {
       s.onFull = (raw, ent) => {
-        game.loadRaw(raw);
+        // Pick the view entity first: loading the snapshot reads the camera angles from it.
         game.setViewEnt(ent);
+        game.loadRaw(raw);
         if (game.sv) game.sv.netMode = true;
       };
       s.onDelta = (m) => {

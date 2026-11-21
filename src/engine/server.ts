@@ -86,6 +86,8 @@ export class Server {
   cmd: UserCmd = { forward: 0, side: 0, up: 0, buttons: 0, impulse: 0, angles: [0, 0, 0] };
   /** Co-op: extra player edicts, mapped to the latest command from their client. */
   remoteCmds = new Map<number, UserCmd>();
+  /** Co-op: a joiner's button taps and impulses, one entry per command, each used by one tick. */
+  remoteEvents = new Map<number, { buttons: number; impulse: number }[]>();
   isPlayer(e: number): boolean {
     return e === 1 || this.remoteCmds.has(e);
   }
@@ -1400,6 +1402,7 @@ export class Server {
     const vm = this.vm;
     const e = this.alloc();
     this.remoteCmds.set(e, { forward: 0, side: 0, up: 0, buttons: 0, impulse: 0, angles: [0, 0, 0] });
+    this.remoteEvents.set(e, []);
     this.fset(e, 'colormap', e);
     this.fset(e, 'team', 1);
     this.iset(e, 'netname', vm.newString('player'));
@@ -1413,6 +1416,7 @@ export class Server {
   removeRemotePlayer(e: number) {
     if (!this.remoteCmds.has(e)) return;
     this.remoteCmds.delete(e);
+    this.remoteEvents.delete(e);
     this.freeEdict(e);
   }
 
@@ -1422,7 +1426,10 @@ export class Server {
     // The local player (entity 1) is always first; remote co-op players follow.
     const players = [1, ...this.remoteCmds.keys()];
     for (const e of players) {
-      const c = this.cmdOf(e);
+      const held = this.cmdOf(e);
+      // A joiner's taps and impulses wait in their queue, so one that arrives between ticks is still used.
+      const ev = e === 1 ? undefined : this.remoteEvents.get(e)?.shift();
+      const c: UserCmd = e === 1 ? held : { ...held, buttons: held.buttons | (ev?.buttons ?? 0), impulse: ev?.impulse ?? 0 };
       // read client move
       this.vset(e, 'v_angle', c.angles);
       this.fset(e, 'button0', c.buttons & 1);

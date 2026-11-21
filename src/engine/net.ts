@@ -37,6 +37,8 @@ export class NetSession {
   private remoteEnt = 0;
   private remoteSv: Server | null = null;
   private inCmd: any = null;
+  // Joiner taps and impulses not yet handed to the host's simulation.
+  private pendingEvents: { buttons: number; impulse: number }[] = [];
 
   private needFull = false;
   private lastSv: Server | null = null;
@@ -73,7 +75,7 @@ export class NetSession {
       const m = data as any;
       if (m.k === 'full') this.onFull?.(m.raw, m.ent);
       else if (m.k === 'd') this.onDelta?.(m);
-      else if (m.k === 'cmd') this.inCmd = m.c;
+      else if (m.k === 'cmd') this.receiveCmd(m.c);
     });
     if (conn.open) {
       this.open = true;
@@ -126,11 +128,20 @@ export class NetSession {
     this.remoteEnt = 0;
     this.remoteSv = null;
     this.inCmd = null;
+    this.pendingEvents = [];
     this.open = false;
     this.conn?.close();
     this.peer?.destroy();
     this.peer = null;
     this.conn = null;
+  }
+
+  private receiveCmd(c: any) {
+    this.inCmd = c;
+    if (c.buttons || c.impulse) {
+      this.pendingEvents.push({ buttons: c.buttons | 0, impulse: c.impulse | 0 });
+      if (this.pendingEvents.length > 64) this.pendingEvents.shift();
+    }
   }
 
   private send(m: unknown) {
@@ -157,6 +168,9 @@ export class NetSession {
     }
     // Input from the joiner drives their player entity from the next tick.
     if (this.inCmd) sv.remoteCmds.set(this.remoteEnt, this.inCmd);
+    // Taps and impulses go to the player's queue; the server uses one per tick.
+    const q = sv.remoteEvents.get(this.remoteEnt);
+    if (q) while (this.pendingEvents.length && q.length < 32) q.push(this.pendingEvents.shift()!);
     const now = performance.now();
     if (!this.needFull && now - this.lastPump < PUMP_MS) return;
     this.lastPump = now;

@@ -60,6 +60,8 @@ export class Game {
   // Touch devices never get pointer lock, so look and fire must not wait for it.
   touchMode = false;
   viewAngles: [number, number, number] = [0, 0, 0];
+  /** Button presses that happened between frames; sent with the next command so a quick tap is not lost. */
+  private buttonPulse = 0;
   cmd: UserCmd = { forward: 0, side: 0, up: 0, buttons: 0, impulse: 0, angles: [0, 0, 0] };
   sens = 3;
   alwaysRun = true;
@@ -165,6 +167,8 @@ export class Game {
   destroy() {
     cancelAnimationFrame(this.raf);
     this.snd.stopAll();
+    this.net?.close();
+    this.snd.close();
     if (document.pointerLockElement) document.exitPointerLock();
     this.rend.renderer.dispose();
   }
@@ -588,6 +592,10 @@ export class Game {
       this.menuKey(ev);
       return true;
     }
+    if (!ev.repeat) {
+      if (k === 'Space') this.buttonPulse |= 2;
+      if (k === 'ControlLeft' || k === 'ControlRight') this.buttonPulse |= 1;
+    }
     if (this.state === 'finale') {
       if (this.now - this.finaleStart > 1500 && (k === 'Space' || k === 'Enter' || k === 'Escape')) this.exitToTitle();
       return true;
@@ -633,6 +641,7 @@ export class Game {
       return;
     }
     this.mouseButtons |= 1 << b;
+    this.buttonPulse |= b === 0 ? 1 : b === 1 || b === 2 ? 2 : 0;
   }
   onMouseUp(b: number) {
     this.mouseButtons &= ~(1 << b);
@@ -678,6 +687,8 @@ export class Game {
     if (k.has('ControlLeft') || k.has('ControlRight') || this.mouseButtons & 1) c.buttons |= 1;
     // Middle (bit 2) and right (bit 4) mouse buttons both jump.
     if (k.has('Space') || this.mouseButtons & (2 | 4)) c.buttons |= 2;
+    c.buttons |= this.buttonPulse;
+    this.buttonPulse = 0;
     c.angles = [this.viewAngles[0], this.viewAngles[1], 0];
     return c;
   }
@@ -853,7 +864,8 @@ export class Game {
     this.now = t;
     let dt = (t - this.last) / 1000;
     this.last = t;
-    if (dt > 0.1) dt = 0.1;
+    // Same cap as the server's fixed-step clock: longer gaps (very low frame rates) are dropped, not replayed.
+    if (dt > 0.25) dt = 0.25;
     if (this.W < 10) return;
     if (this.queued && this.state === 'loading') {
       this.drawOverlay();
@@ -1025,7 +1037,12 @@ export class Game {
     this.rend.render(sv, { origin: eye, angles: ang, time, dt: running ? dt : 0, dlights: lights, weapon, drawWorld: true, hideEntities: false });
     // audio listener
     const av = angleVectors(ang);
-    this.snd.update(eye, av.right);
+    this.snd.update(eye, av.right, (e) => (e < sv.numEdicts && !sv.free[e] ? sv.lerpOrigin(e) : null));
+    // Map ambience (water, wind, slime, lava) comes from the leaf the listener is in.
+    if (!this.demoMode && sv.bsp) {
+      const leaf = sv.bsp.leafs[sv.bsp.leafForPoint(eye[0], eye[1], eye[2])];
+      this.snd.setLeafAmbient(leaf ? leaf.ambient : [0, 0, 0, 0]);
+    }
     this.eyeContents = sv.pointContents(eye);
     this.hud.clearRect(0, 0, this.W, this.H);
   }

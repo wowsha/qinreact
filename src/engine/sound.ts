@@ -12,6 +12,9 @@ interface Chan {
   attn: number;
 }
 
+// Map ambience channels in Quake's leaf order: water, sky (wind), slime, lava.
+const LEAF_AMBIENT = ['ambience/water1.wav', 'ambience/wind2.wav', 'ambience/swamp1.wav', 'ambience/fire1.wav'];
+
 export class SoundSystem {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
@@ -100,13 +103,19 @@ export class SoundSystem {
     if (!this.ctx || this.ctx.state !== 'running') return;
     const buf = this.decode(name);
     if (!buf) return;
+    // Out-of-range sounds still start; their gain follows the listener in update().
     const sp = this.spatial(org, attn);
-    if (sp.scale <= 0) return;
     if (chan !== 0) {
       for (const c of this.chans) if (c.ent === ent && c.chan === chan) { try { c.src.stop(); } catch { /* */ } }
     }
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
+    // A sound with a loop cue (moving doors and platforms, some ambience) loops until its channel is replaced or stopped.
+    const ls = (buf as any)._loop as number;
+    if (ls >= 0) {
+      src.loop = true;
+      src.loopStart = ls / buf.sampleRate;
+    }
     const gain = this.ctx.createGain();
     gain.gain.value = (vol / 255) * sp.scale;
     const pan = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null;
@@ -116,7 +125,7 @@ export class SoundSystem {
       gain.connect(pan);
       pan.connect(this.master!);
     } else gain.connect(this.master!);
-    const c: Chan = { ent, chan, src, gain, pan, org: null, vol, attn };
+    const c: Chan = { ent, chan, src, gain, pan, org: org ? org.slice() : null, vol, attn };
     this.chans.push(c);
     src.onended = () => {
       this.chans = this.chans.filter((x) => x !== c);
@@ -145,6 +154,37 @@ export class SoundSystem {
     this.ambients.push({ ent: 0, chan: 0, src, gain, pan, org: org.slice(), vol: vol * 255, attn });
   }
 
+  // Map ambience from the listener's BSP leaf: four looping channels whose volume eases toward each level.
+  private leafChans: ({ src: AudioBufferSourceNode; gain: GainNode; cur: number } | null)[] | null = null;
+  setLeafAmbient(levels: number[]) {
+    if (!this.ctx || !this.master || this.ctx.state !== 'running') return;
+    const ctx = this.ctx;
+    if (!this.leafChans) {
+      this.leafChans = LEAF_AMBIENT.map((name) => {
+        const buf = this.decode(name);
+        if (!buf) return null;
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        const ls = (buf as any)._loop as number;
+        if (ls >= 0) src.loopStart = ls / buf.sampleRate;
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        src.connect(gain);
+        gain.connect(this.master!);
+        src.start();
+        return { src, gain, cur: 0 };
+      });
+    }
+    for (let i = 0; i < 4; i++) {
+      const c = this.leafChans[i];
+      if (!c) continue;
+      const target = levels[i] < 8 ? 0 : levels[i]; // tiny levels are silent, as in Quake
+      c.cur += (target - c.cur) * 0.1;
+      c.gain.gain.value = c.cur / 255;
+    }
+  }
+
   clearAmbients() {
     for (const a of this.ambients) { try { a.src.stop(); } catch { /* */ } }
     this.ambients = [];
@@ -152,12 +192,31 @@ export class SoundSystem {
   stopAll() {
     for (const c of this.chans) { try { c.src.stop(); } catch { /* */ } }
     this.chans = [];
+    for (const l of this.leafChans ?? []) { try { l?.src.stop(); } catch { /* */ } }
+    this.leafChans = null;
     this.clearAmbients();
   }
+  /** Release the audio device when the game is torn down. */
+  close() {
+    this.stopAll();
+    this.ctx?.close().catch(() => { /* already closed */ });
+    this.ctx = null;
+    this.master = null;
+    this.buffers.clear();
+  }
 
-  update(org: number[], right: number[]) {
+  update(org: number[], right: number[], originOf?: (ent: number) => number[] | null) {
     this.listener.org = org;
     this.listener.right = right;
+    // Sounds started on an entity follow it; other sounds keep their start position.
+    for (const c of this.chans) {
+      if (!c.org) continue;
+      const at = (c.ent > 0 && originOf?.(c.ent)) || c.org;
+      c.org = at.slice();
+      const sp = this.spatial(at, c.attn);
+      c.gain.gain.value = (c.vol / 255) * sp.scale;
+      if (c.pan) c.pan.pan.value = sp.pan;
+    }
     for (const a of this.ambients) {
       const sp = this.spatial(a.org, a.attn);
       a.gain.gain.value = (a.vol / 255) * sp.scale;
