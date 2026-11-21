@@ -87,6 +87,9 @@ export default function App() {
     const ro = new ResizeObserver(fit);
     ro.observe(wrapRef.current);
     const kd = (e: KeyboardEvent) => {
+      // Let text fields (e.g. the co-op invite box) receive their keys; the game must not swallow them.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) return;
       if (game.onKeyDown(e)) e.preventDefault();
     };
     const ku = (e: KeyboardEvent) => game.onKeyUp(e);
@@ -98,6 +101,8 @@ export default function App() {
     const cm = (e: Event) => e.preventDefault();
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
+    const bl = () => game.onBlur();
+    window.addEventListener('blur', bl);
     window.addEventListener('mousemove', mm);
     window.addEventListener('mousedown', md);
     window.addEventListener('mouseup', mu);
@@ -108,6 +113,7 @@ export default function App() {
       ro.disconnect();
       window.removeEventListener('keydown', kd);
       window.removeEventListener('keyup', ku);
+      window.removeEventListener('blur', bl);
       window.removeEventListener('mousemove', mm);
       window.removeEventListener('mousedown', md);
       window.removeEventListener('mouseup', mu);

@@ -202,6 +202,8 @@ export class GameRenderer {
   lmU = { value: null as THREE.DataTexture | null };
   aliasCache = new Map<string, { model: AliasModel; skins: THREE.DataTexture[] } | null>();
   entVis = new Map<number, AliasVis & { name: string }>();
+  // Brush-model entities (health and ammo boxes): one group per entity, sharing the model's geometry.
+  entBrush = new Map<number, { name: string; group: THREE.Group }>();
   staticVis: (AliasVis & { name: string; st: StaticEnt })[] = [];
   weaponVis: (AliasVis & { name: string }) | null = null;
   particles: Particle[] = [];
@@ -282,6 +284,13 @@ export class GameRenderer {
   }
 
   // ---------------- level ----------------
+  /** Remove a per-entity alias visual and free its own GPU buffers. Skins are cached and shared, so they stay. */
+  private freeVis(v: AliasVis, parent: THREE.Object3D) {
+    parent.remove(v.mesh);
+    v.geom.dispose();
+    v.mat.dispose();
+  }
+
   private disposeGroup(g: { group: THREE.Group; mats: { mat: THREE.ShaderMaterial }[] }) {
     this.root.remove(g.group);
     g.group.traverse((o) => {
@@ -296,9 +305,11 @@ export class GameRenderer {
     this.models = [];
     for (const g of this.brushGroups.values()) this.disposeGroup(g);
     this.brushGroups.clear();
-    for (const v of this.entVis.values()) this.root.remove(v.mesh);
+    for (const v of this.entVis.values()) this.freeVis(v, this.root);
     this.entVis.clear();
-    for (const v of this.staticVis) this.root.remove(v.mesh);
+    for (const bv of this.entBrush.values()) this.root.remove(bv.group);
+    this.entBrush.clear();
+    for (const v of this.staticVis) this.freeVis(v, this.root);
     this.staticVis = [];
     this.particles.length = 0;
     this.beams.length = 0;
@@ -676,7 +687,7 @@ export class GameRenderer {
     const frameIdx = Math.floor(time * 10);
     const ents = new Map<number, number>(); // submodel -> entity frame
     const seen = new Set<number>();
-    const seenBrush = new Set<string>();
+    const seenBrush = new Set<number>();
     const hasSub = new Set<number>();
     if (!p.hideEntities) {
       for (let e = 1; e < sv.numEdicts; e++) {
@@ -702,17 +713,29 @@ export class GameRenderer {
           let bg = this.brushGroups.get(name);
           if (!bg) {
             bg = this.buildModel(bf, 0);
+            bg.group.visible = false; // template only: each entity gets its own copy below
             this.brushGroups.set(name, bg);
             this.root.add(bg.group);
           }
-          bg.group.visible = true;
-          bg.group.position.set(origin[0], origin[1], origin[2]);
-          this.setRot(bg.group, angles);
-          seenBrush.add(name);
+          let bv = this.entBrush.get(e);
+          if (bv && bv.name !== name) {
+            this.root.remove(bv.group);
+            this.entBrush.delete(e);
+            bv = undefined;
+          }
+          if (!bv) {
+            bv = { name, group: bg.group.clone() };
+            this.root.add(bv.group);
+            this.entBrush.set(e, bv);
+          }
+          bv.group.visible = true;
+          bv.group.position.set(origin[0], origin[1], origin[2]);
+          this.setRot(bv.group, angles);
+          seenBrush.add(e);
         } else if (e !== this.viewEnt && name.endsWith('.mdl')) {
           let v = this.entVis.get(e);
           if (v && v.name !== name) {
-            this.root.remove(v.mesh);
+            this.freeVis(v, this.root);
             this.entVis.delete(e);
             v = undefined;
           }
@@ -736,11 +759,16 @@ export class GameRenderer {
       }
     }
     for (let i = 1; i < this.models.length; i++) if (!hasSub.has(i)) this.models[i].group.visible = false;
-    for (const [n, g] of this.brushGroups) if (!seenBrush.has(n)) g.group.visible = false;
+    for (const [e, bv] of this.entBrush) {
+      if (!seenBrush.has(e)) {
+        this.root.remove(bv.group);
+        this.entBrush.delete(e);
+      }
+    }
     this.models[0] && (this.models[0].group.visible = p.drawWorld);
     for (const [e, v] of this.entVis) {
       if (!seen.has(e)) {
-        this.root.remove(v.mesh);
+        this.freeVis(v, this.root);
         this.entVis.delete(e);
       }
     }
@@ -769,7 +797,7 @@ export class GameRenderer {
 
     // view model
     if (this.weaponVis && (!p.weapon || this.weaponVis.name !== p.weapon.model)) {
-      this.viewRoot.remove(this.weaponVis.mesh);
+      this.freeVis(this.weaponVis, this.viewRoot);
       this.weaponVis = null;
     }
     if (p.weapon && p.weapon.model) {

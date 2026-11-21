@@ -211,7 +211,14 @@ export function applyDelta(sv: Server, m: any) {
   const fr = m.fr as number[];
   for (let i = 0; i < fr.length; i += 2) sv.free[fr[i]] = !!fr[i + 1];
   for (const s of m.dy as string[]) vm.dynStrings.push(s);
-  if (m.ls) sv.lightstyles = m.ls;
+  if (m.ls) {
+    // Tell the renderer about changed light styles too, not just the server copy.
+    for (let i = 0; i < 64; i++) {
+      if (m.ls[i] === sv.lightstyles[i]) continue;
+      sv.lightstyles[i] = m.ls[i];
+      sv.ev.lightstyle?.(i, m.ls[i]);
+    }
+  }
   sv.numEdicts = m.ne;
   sv.time = m.t;
 }

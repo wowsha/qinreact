@@ -637,6 +637,11 @@ export class Game {
   onMouseUp(b: number) {
     this.mouseButtons &= ~(1 << b);
   }
+  /** Window lost focus: release keys and buttons so nothing stays held (their key-up never arrives). */
+  onBlur() {
+    this.keys.clear();
+    this.mouseButtons = 0;
+  }
   onWheel(dy: number) {
     if (this.state !== 'playing' || this.menu) return;
     this.cmd.impulse = dy < 0 ? 10 : 12;
@@ -671,7 +676,8 @@ export class Game {
     c.up = (k.has('KeyF') ? 1 : 0) * 200 - (k.has('KeyC') ? 1 : 0) * 200;
     c.buttons = 0;
     if (k.has('ControlLeft') || k.has('ControlRight') || this.mouseButtons & 1) c.buttons |= 1;
-    if (k.has('Space') || this.mouseButtons & 2) c.buttons |= 2;
+    // Middle (bit 2) and right (bit 4) mouse buttons both jump.
+    if (k.has('Space') || this.mouseButtons & (2 | 4)) c.buttons |= 2;
     c.angles = [this.viewAngles[0], this.viewAngles[1], 0];
     return c;
   }
@@ -1485,11 +1491,15 @@ export class Game {
   }
   loadRaw(raw: string | null) {
     if (!raw) return;
-    this.setDemoMode(false);
+    let swapped = false;
     try {
       const snap = JSON.parse(raw);
-      this.currentMap = snap.mapName ?? this.currentMap;
+      const map = snap.mapName;
+      if (!map || !this.assets.pak.getBuffer(`maps/${map}.bsp`)) throw new Error(`save uses a map that is not in the PAK: ${map}`);
+      this.setDemoMode(false);
+      this.currentMap = map;
       this.sv = this.makeServer();
+      swapped = true;
       this.state = 'loading';
       this.levelReady = false;
       this.sv.loadState(snap);
@@ -1499,6 +1509,7 @@ export class Game {
       this.ambientQueue = [];
       this.snd.stopAll();
       this.ambientStarted = false;
+      this.paused = false;
       this.state = 'playing';
       this.menu = null;
       this.inter = false;
@@ -1510,7 +1521,8 @@ export class Game {
       console.error(e);
       this.menuMsg = 'Load failed';
       this.menuMsgUntil = this.now + 2000;
-      this.state = this.sv ? 'playing' : 'title';
+      // Once the new world has started, a half-loaded game can't be played: go back to the title screen.
+      if (swapped) this.exitToTitle();
     }
   }
 
