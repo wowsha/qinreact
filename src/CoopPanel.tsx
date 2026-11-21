@@ -31,6 +31,14 @@ export function CoopPanel({ game, onClose, invite }: { game: Game; onClose: () =
         // The friend is in the game now: close the panel so the world is visible.
         onClose();
       };
+      s.onEvent = (m) => game.netEvent(m);
+      s.onClosed = () => {
+        // The host left: this game can't go on without them, so return to the title screen.
+        game.net = null;
+        s.close();
+        game.exitToTitle();
+        setStatus('The host left the game.');
+      };
       s.onDelta = (m) => {
         if (!game.sv) return;
         // Keep the previous positions so the picture can glide between updates.

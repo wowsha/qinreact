@@ -32,6 +32,11 @@ export class NetSession {
   onFull: ((raw: string, ent: number) => void) | null = null;
   onDelta: ((m: any) => void) | null = null;
   onStatus: (() => void) | null = null;
+  /** Joiner: a sound, effect or message from the host (see Game.netEvent). */
+  onEvent: ((m: any) => void) | null = null;
+  /** Joiner: the host's connection ended while we were still playing. */
+  onClosed: (() => void) | null = null;
+  private leaving = false;
 
   // host: the joiner's player entity in the current level, and its latest input
   private remoteEnt = 0;
@@ -68,7 +73,9 @@ export class NetSession {
     });
     conn.on('close', () => {
       this.open = false;
+      this.dropRemote();
       this.setStatus('Disconnected');
+      if (!this.leaving) this.onClosed?.();
     });
     conn.on('error', () => this.setStatus('Connection error'));
     conn.on('data', (data) => {
@@ -76,6 +83,7 @@ export class NetSession {
       if (m.k === 'full') this.onFull?.(m.raw, m.ent);
       else if (m.k === 'd') this.onDelta?.(m);
       else if (m.k === 'cmd') this.receiveCmd(m.c);
+      else if (m.k === 'ev') this.onEvent?.(m.e);
     });
     if (conn.open) {
       this.open = true;
@@ -118,10 +126,10 @@ export class NetSession {
     this.attach(this.peer!.connect(inviteId, { reliable: true }));
   }
 
-  close() {
+  /** Host: the joiner is gone. Remove their player and go back to singleplayer rules. */
+  private dropRemote() {
     if (this.role === 'host' && this.remoteSv && this.remoteEnt) this.remoteSv.removeRemotePlayer(this.remoteEnt);
     if (this.role === 'host' && this.remoteSv) {
-      // Back to singleplayer rules.
       this.remoteSv.cvars.coop = 0;
       this.remoteSv.gset('coop', 0);
     }
@@ -129,6 +137,16 @@ export class NetSession {
     this.remoteSv = null;
     this.inCmd = null;
     this.pendingEvents = [];
+  }
+
+  /** Host: send a sound, effect or message to the joiner. */
+  event(m: object) {
+    this.send({ k: 'ev', e: m });
+  }
+
+  close() {
+    this.leaving = true;
+    this.dropRemote();
     this.open = false;
     this.conn?.close();
     this.peer?.destroy();
@@ -157,7 +175,7 @@ export class NetSession {
   pump(sv: Server) {
     if (this.role !== 'host' || !this.open || !this.fullSender) return;
     // A new level gets a new player entity for the joiner.
-    if (sv !== this.remoteSv) {
+    if (sv !== this.remoteSv || !sv.remoteCmds.has(this.remoteEnt)) {
       this.remoteSv = sv;
       // Co-op rules: players spawn on the co-op start points. Without this both players
       // spawn on the single start point and telefrag each other.

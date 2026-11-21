@@ -302,24 +302,28 @@ export function installBuiltins(sv: Server) {
   });
 
   B('checkclient', (v) => {
-    if (sv.time - sv.lastCheckTime >= 0.1 || !sv.checkPvs) {
-      sv.lastCheckTime = sv.time;
-      const o = sv.vget(1, 'origin'), vo = sv.vget(1, 'view_ofs');
-      const leaf = sv.bsp.leafForPoint(o[0] + vo[0], o[1] + vo[1], o[2] + vo[2]);
-      sv.checkPvs = sv.bsp.decompressVis(leaf);
-    }
-    if (sv.free[1] || sv.fget(1, 'health') <= 0) return v.retI(0);
+    // Every living player (the host and any joiner) is a candidate, taken in turn.
+    const players = [1, ...sv.remoteCmds.keys()].filter((p) => !sv.free[p] && sv.fget(p, 'health') > 0);
+    if (!players.length) return v.retI(0);
     const s = self();
     const o = sv.vget(s, 'origin'), vo = sv.vget(s, 'view_ofs');
-    const leaf = sv.bsp.leafForPoint(o[0] + vo[0], o[1] + vo[1], o[2] + vo[2]);
-    const l = leaf - 1;
-    if (l < 0 || !(sv.checkPvs![l >> 3] & (1 << (l & 7)))) return v.retI(0);
-    // PVS alone lets monsters notice the player through walls; require a clear line
     const eye = [o[0] + vo[0], o[1] + vo[1], o[2] + vo[2]];
-    const po = sv.vget(1, 'origin'), pvo = sv.vget(1, 'view_ofs');
-    const tr: any = sv.move(eye, [0, 0, 0], [0, 0, 0], [po[0] + pvo[0], po[1] + pvo[1], po[2] + pvo[2]], 1, s);
-    if (tr.fraction < 1) return v.retI(0);
-    v.retI(1);
+    const start = sv.checkIdx++ % players.length;
+    for (let i = 0; i < players.length; i++) {
+      const p = players[(start + i) % players.length];
+      const po = sv.vget(p, 'origin'), pvo = sv.vget(p, 'view_ofs');
+      const target = [po[0] + pvo[0], po[1] + pvo[1], po[2] + pvo[2]];
+      // The monster's leaf must be potentially visible from the player's leaf.
+      const mleaf = sv.bsp.leafForPoint(eye[0], eye[1], eye[2]) - 1;
+      if (mleaf < 0) continue;
+      const pvs = sv.bsp.decompressVis(sv.bsp.leafForPoint(target[0], target[1], target[2]));
+      if (!(pvs[mleaf >> 3] & (1 << (mleaf & 7)))) continue;
+      // PVS alone lets monsters notice the player through walls; require a clear line.
+      const tr: any = sv.move(eye, [0, 0, 0], [0, 0, 0], target, 1, s);
+      if (tr.fraction < 1) continue;
+      return v.retI(p);
+    }
+    v.retI(0);
   });
 
   // ---- movement helpers ----

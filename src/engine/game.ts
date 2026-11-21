@@ -199,19 +199,31 @@ export class Game {
         // Item pickups play items/*.wav; log them so pickups show in the console.
         if (name.startsWith('items/')) console.log(`[qinreact] pickup sound ${name}`);
         this.snd.play(e, ch, name, vol, attn, org);
+        this.relay({ k: 'snd', e, ch, name, vol, attn, org });
       },
       ambient: (org, name, vol, attn) => {
         if (this.demoMode) return;
         this.ambientQueue.push({ org, name, vol, attn });
       },
-      print: (s) => this.conPrint(s),
+      print: (s) => {
+        this.conPrint(s);
+        this.relay({ k: 'print', s });
+      },
       centerprint: (s) => {
         console.log(`[qinreact] center: ${s.replace(/\n/g, ' / ')}`);
         this.center = { text: s, until: this.now + 2000 };
+        this.relay({ k: 'center', s });
       },
       lightstyle: (i, s) => this.rend.setLightstyle(i, s),
-      particle: (org, dir, color, count) => (count >= 255 ? this.particleExplosion(org) : this.runParticles(org, dir, color, count)),
-      temp: (t, a) => this.tempEntity(t, a),
+      particle: (org, dir, color, count) => {
+        if (count >= 255) this.particleExplosion(org);
+        else this.runParticles(org, dir, color, count);
+        this.relay({ k: 'part', org, dir, color, count });
+      },
+      temp: (t, a) => {
+        this.tempEntity(t, a);
+        this.relay({ k: 'temp', t, a });
+      },
       intermission: () => {
         console.log('[qinreact] intermission');
         this.inter = true;
@@ -226,7 +238,11 @@ export class Game {
         if (document.pointerLockElement) document.exitPointerLock();
       },
       stuffcmd: (s) => this.stuffcmd(s),
-      damage: (save, take, from) => this.onDamage(save, take, from),
+      damage: (save, take, from, target) => {
+        // The local player's screen reacts here; a joiner's hits are sent to them.
+        if (target === undefined || target === 1) this.onDamage(save, take, from);
+        else this.relay({ k: 'dmg', save, take, from });
+      },
       makeStatic: (st) => {
         sv.statics.push(st);
         if (this.levelReady) this.rend.addStatic(st);
@@ -831,6 +847,27 @@ export class Game {
 
   dlight(org: number[], radius: number, dur: number, decay = 0) {
     this.trans.push({ org, radius, die: this.now + dur * 1000, decay, born: this.now });
+  }
+
+  /** Host: send a message to the joiner, if there is one. */
+  private relay(m: object) {
+    if (this.net?.role === 'host') this.net.event(m);
+  }
+
+  /** Joiner: play a sound, effect or message that the host's simulation produced. */
+  netEvent(m: any) {
+    if (!this.sv) return;
+    switch (m.k) {
+      case 'snd': this.snd.play(m.e, m.ch, m.name, m.vol, m.attn, m.org); break;
+      case 'temp': this.tempEntity(m.t, m.a); break;
+      case 'part':
+        if (m.count >= 255) this.particleExplosion(m.org);
+        else this.runParticles(m.org, m.dir, m.color, m.count);
+        break;
+      case 'dmg': this.onDamage(m.save, m.take, m.from); break;
+      case 'print': this.conPrint(m.s); break;
+      case 'center': this.center = { text: m.s, until: this.now + 2000 }; break;
+    }
   }
 
   tempEntity(type: number, a: number[]) {
@@ -1528,6 +1565,8 @@ export class Game {
       this.state = 'loading';
       this.levelReady = false;
       this.sv.loadState(snap);
+      // A host's save may hold joiner players from the old session; the host adds the joiner again.
+      if (!this.net || this.net.role === 'host') this.sv.removeStalePlayers();
       this.rend.loadLevel(this.sv);
       for (const s of this.sv.statics) this.rend.addStatic(s);
       this.levelReady = true;

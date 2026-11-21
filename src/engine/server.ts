@@ -56,7 +56,7 @@ export interface ServerEvents {
   sellscreen?(): void;
   stuffcmd?(s: string): void;
   changelevel?(map: string): void;
-  damage?(save: number, take: number, from: number[]): void;
+  damage?(save: number, take: number, from: number[], target?: number): void;
   makeStatic?(e: StaticEnt): void;
   setAngles?(a: number[]): void;
   error?(s: string): void;
@@ -104,6 +104,8 @@ export class Server {
   active = false;
   lastCheckTime = -1;
   checkPvs: Uint8Array | null = null;
+  /** Rotates which player checkclient looks at first, so every player gets noticed. */
+  checkIdx = 0;
   // cached offsets
   G: Record<string, number> = {};
   F: Record<string, number> = {};
@@ -271,6 +273,9 @@ export class Server {
 
   // ---------- level loading ----------
   spawnLevel(map: string): boolean {
+    // A new level has no joiner players yet: the host adds them again, in fresh slots.
+    this.remoteCmds.clear();
+    this.remoteEvents.clear();
     const buf = this.loadBsp(map);
     if (!buf) throw new Error('Cannot load map ' + map);
     this.bsp = new Bsp(buf);
@@ -1400,7 +1405,10 @@ export class Server {
   /** Co-op: spawn a player entity for a remote client. Returns its edict number. */
   addRemotePlayer(): number {
     const vm = this.vm;
-    const e = this.alloc();
+    // Always a fresh slot: a slot freed by the level could still show its old entity to the joiner.
+    if (this.numEdicts >= vm.maxEdicts) throw new Error('no free edict for a joiner');
+    const e = this.numEdicts++;
+    this.clearEdict(e);
     this.remoteCmds.set(e, { forward: 0, side: 0, up: 0, buttons: 0, impulse: 0, angles: [0, 0, 0] });
     this.remoteEvents.set(e, []);
     this.fset(e, 'colormap', e);
@@ -1410,6 +1418,15 @@ export class Server {
     this.callGlobalFn('ClientConnect', e);
     this.callGlobalFn('PutClientInServer', e);
     return e;
+  }
+
+  /** After loading a save on the host: drop player entities stored in it. The host re-adds joiners. */
+  removeStalePlayers() {
+    for (let e = 2; e < this.numEdicts; e++) {
+      if (!this.free[e] && this.str(e, 'classname') === 'player') this.freeEdict(e);
+    }
+    this.remoteCmds.clear();
+    this.remoteEvents.clear();
   }
 
   /** Co-op: forget a remote player and free its edict. */
@@ -1458,8 +1475,7 @@ export class Server {
           const o = this.vget(inf, 'origin'), m = this.vget(inf, 'mins'), x = this.vget(inf, 'maxs');
           from = [o[0] + (m[0] + x[0]) * 0.5, o[1] + (m[1] + x[1]) * 0.5, o[2] + (m[2] + x[2]) * 0.5];
         }
-        // Only the local player's screen reacts to damage here.
-        if (e === 1) this.ev.damage?.(save, take, from);
+        this.ev.damage?.(save, take, from, e);
         this.fset(e, 'dmg_take', 0);
         this.fset(e, 'dmg_save', 0);
       }
