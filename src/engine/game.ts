@@ -117,6 +117,8 @@ export class Game {
   // Co-op over the network (see net.ts). Singleplayer leaves this null.
   net: NetSession | null = null;
   onCoop: (() => void) | null = null;
+  /** The co-op panel is open over the game: releasing the mouse for it must not bring up the menu. */
+  panelOpen = false;
   lastAuto = 0;
   currentMap = '';
   deadAt = 0;
@@ -657,7 +659,7 @@ export class Game {
   }
   onPointerLockChange() {
     if (this.touchMode) return;
-    if (!document.pointerLockElement && this.state === 'playing' && !this.menu && !this.inter && !this.consoleOpen) {
+    if (!document.pointerLockElement && this.state === 'playing' && !this.menu && !this.inter && !this.consoleOpen && !this.panelOpen) {
       this.menu = 'main';
     }
   }
@@ -1423,8 +1425,14 @@ export class Game {
         break;
       }
       case 'multi':
-        if (enter) this.onCoop?.();
-        if (k === 'Escape' || enter) back('main');
+        if (k === 'Escape') return back('main');
+        if (enter) {
+          // A friend can only join a game that is running, so start a map first when none is.
+          if (this.demoMode || this.state !== 'playing' || !this.sv) this.startChosenLevel('e1m1', 1);
+          // Close the menu so the game keeps running (and sending the world to the friend) behind the panel.
+          this.menu = null;
+          this.onCoop?.();
+        }
         break;
       case 'options': {
         if (k === 'Escape') return back('main');

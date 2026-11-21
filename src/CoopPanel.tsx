@@ -28,6 +28,8 @@ export function CoopPanel({ game, onClose, invite }: { game: Game; onClose: () =
         game.setViewEnt(ent);
         game.loadRaw(raw);
         if (game.sv) game.sv.netMode = true;
+        // The friend is in the game now: close the panel so the world is visible.
+        onClose();
       };
       s.onDelta = (m) => {
         if (!game.sv) return;

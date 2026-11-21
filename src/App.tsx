@@ -19,6 +19,9 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>('drop');
   const [touchGame, setTouchGame] = useState<Game | null>(null);
   const [coopOpen, setCoopOpen] = useState(false);
+  useEffect(() => {
+    if (touchGame) touchGame.panelOpen = coopOpen;
+  }, [coopOpen, touchGame]);
   const [error, setError] = useState('');
   const [over, setOver] = useState(false);
   const [info, setInfo] = useState('');
