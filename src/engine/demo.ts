@@ -17,7 +17,7 @@ const SVC = {
 const U = {
   MOREBITS: 1 << 0, ORIGIN1: 1 << 1, ORIGIN2: 1 << 2, ORIGIN3: 1 << 3, ANGLE2: 1 << 4, NOLERP: 1 << 5, FRAME: 1 << 6,
   SIGNAL: 1 << 7, ANGLE1: 1 << 8, ANGLE3: 1 << 9, MODEL: 1 << 10, COLORMAP: 1 << 11, SKIN: 1 << 12, EFFECTS: 1 << 13,
-  LONGENTITY: 1 << 14,
+  LONGENTITY: 1 << 14, REMOVE: 1 << 15,
 };
 // client data flags
 const SU = {
@@ -62,6 +62,8 @@ interface EntState {
   origin: number[]; angles: number[];
 }
 type Op =
+  | { k: 'remove'; e: number }
+  | { k: 'sound'; e: number; ch: number; idx: number; vol: number; attn: number; org: number[] }
   | { k: 'upd'; e: number; model?: number; frame?: number; colormap?: number; skin?: number; effects?: number; o: (number | undefined)[]; a: (number | undefined)[] }
   | { k: 'base'; e: number; st: EntState }
   | { k: 'static'; model: number; frame: number; skin: number; origin: number[]; angles: number[] }
@@ -126,6 +128,8 @@ function parseInto(data: Uint8Array, ops: Op[]): void {
       let bits = cmd;
       if (bits & U.MOREBITS) bits |= r.byte() << 8;
       const e = bits & U.LONGENTITY ? r.ushort() : r.byte();
+      // A freed entity (e.g. a picked-up item) is announced with REMOVE and no other fields.
+      if (bits & U.REMOVE) { ops.push({ k: 'remove', e }); continue; }
       const op: Extract<Op, { k: 'upd' }> = { k: 'upd', e, o: [undefined, undefined, undefined], a: [undefined, undefined, undefined] };
       if (bits & U.MODEL) op.model = r.byte();
       if (bits & U.FRAME) op.frame = r.byte();
@@ -149,9 +153,12 @@ function parseInto(data: Uint8Array, ops: Op[]): void {
       case SVC.setview: r.ushort(); break;
       case SVC.sound: {
         const mask = r.byte();
-        if (mask & 1) r.byte();
-        if (mask & 2) r.byte();
-        r.ushort(); r.byte(); r.coord(); r.coord(); r.coord();
+        const vol = mask & 1 ? r.byte() : 255;
+        const attn = mask & 2 ? r.byte() / 64 : 1;
+        const ec = r.ushort();
+        const idx = r.byte();
+        const org = [r.coord(), r.coord(), r.coord()];
+        ops.push({ k: 'sound', e: ec >> 3, ch: ec & 7, idx, vol, attn, org });
         break;
       }
       case SVC.time: ops.push({ k: 'time', v: r.float() }); break;
@@ -261,6 +268,7 @@ export interface DemoSink {
   temp(t: number, a: number[]): void;
   staticEntity(st: StaticEnt): void;
   view(angles: number[]): void;
+  sound(e: number, ch: number, name: string, vol: number, attn: number, org: number[]): void;
 }
 
 /** Plays parsed records against a Server: the world, entity state and the view. */
@@ -271,6 +279,8 @@ export class DemoPlayer {
   private worldLoaded = false;
   private ents = new Map<number, EntState>();
   private names = new Map<string, number>();
+  // Sounds are not replayed while the first frame is being set up.
+  private priming = false;
 
   constructor(private sv: Server, private sink: DemoSink, buf: ArrayBuffer) {
     this.recs = parseDemo(buf);
@@ -387,9 +397,42 @@ export class DemoPlayer {
           break;
         }
         case 'client': this.applyClient(op.c); break;
-      }
+        case 'remove': {
+          // The entity was freed on the server (an item picked up): stop drawing it.
+          this.ents.delete(op.e);
+          if (op.e < this.sv.numEdicts) this.sv.free[op.e] = true;
+          break;
+        }
+        case 'sound': {
+          if (this.priming) break;
+          const name = this.sv.sounds[op.idx];
+          if (name) this.sink.sound(op.e, op.ch, name, op.vol, op.attn, op.org);
+          if (name?.startsWith('items/')) this.takeItem();
+          break;
+        }      }
     }
     return true;
+  }
+
+  /**
+   * The demo has no message for a picked-up item: the server simply stops mentioning it, and
+   * unchanged entities are not resent. A pickup sound plays at the player, so the item the
+   * player touched is the nearest item model in reach; hide it.
+   */
+  private takeItem(): void {
+    const player = this.ents.get(1);
+    if (!player) return;
+    let best = -1;
+    let bestD = 80; // Quake's touch range is about this, between the player and item boxes
+    for (const [e, st] of this.ents) {
+      const name = this.sv.models[st.model] ?? '';
+      if (e <= 1 || !(name.startsWith('maps/b_') || /^progs\/[wga]_/.test(name))) continue;
+      const d = Math.hypot(st.origin[0] - player.origin[0], st.origin[1] - player.origin[1], st.origin[2] - player.origin[2]);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (best < 0) return;
+    this.ents.delete(best);
+    if (best < this.sv.numEdicts) this.sv.free[best] = true;
   }
 
   /**
@@ -399,11 +442,13 @@ export class DemoPlayer {
   prime(): void {
     const recs = this.recs;
     let k = 0;
+    this.priming = true;
     while (k < recs.length - 1 && !recs[k].ops.some((o) => o.k === 'upd' && o.e === 1 && o.o.some((v) => v !== undefined))) k++;
     for (let i = 0; i <= k; i++) {
       if (i > 0) this.sv.netSnapshot();
       this.apply(recs[i]);
     }
+    this.priming = false;
     this.cur = k;
     this.clock = recs[Math.max(0, k - 1)].time;
     this.sv.time = recs[k].time;

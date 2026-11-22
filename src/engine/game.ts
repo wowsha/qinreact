@@ -368,6 +368,7 @@ export class Game {
         view: (a) => {
           this.viewAngles = [a[0], a[1], 0];
         },
+        sound: (e, ch, name, vol, attn, org) => this.snd.play(e, ch, name, vol, attn, org),
       };
       this.demo = new DemoPlayer(sv, sink, buf);
       this.demo.loadWorld();
@@ -1038,7 +1039,8 @@ export class Game {
     let bob = Math.hypot(vel[0], vel[1]) * 0.02;
     bob = bob * 0.3 + bob * 0.7 * Math.sin(cycle);
     bob = Math.max(-7, Math.min(4, bob));
-    if (this.inter || this.state !== 'playing') bob = 0;
+    // The demo behind the title menu keeps its bob and weapon animation (it is not 'playing').
+    if (this.inter || (this.state !== 'playing' && !this.demoMode)) bob = 0;
     const orgR = sv.lerpOrigin(e);
     const eye = [orgR[0] + vo[0] + 1 / 32, orgR[1] + vo[1] + 1 / 32, orgR[2] + vo[2] + bob + 1 / 32];
     // stair smoothing
