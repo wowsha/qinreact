@@ -245,7 +245,9 @@ export class Bsp {
           planeNormals: this.planeNormals, planeDist: this.planeDist, planeType: this.planeType, planenum, children, firstclipnode: first, clipMins: cm, clipMaxs: cx,
         });
         this.models.push({
-          mins: [f(0), f(1), f(2)], maxs: [f(3), f(4), f(5)], origin: [f(6), f(7), f(8)], headnode,
+          // Quake spreads each submodel's bounds by one unit. Adjacent doors (the halves of a
+          // double door) only count as touching, and so get linked, because of that spread.
+          mins: [f(0) - 1, f(1) - 1, f(2) - 1], maxs: [f(3) + 1, f(4) + 1, f(5) + 1], origin: [f(6), f(7), f(8)], headnode,
           visleafs: dv.getInt32(o + 52, true), firstface: dv.getInt32(o + 56, true), numfaces: dv.getInt32(o + 60, true),
           hulls: [
             mk(this.nodePlane, h0children, headnode[0], [0, 0, 0], [0, 0, 0]),
