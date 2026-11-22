@@ -9,6 +9,16 @@ import { extractPak, fetchShareware } from './engine/shareware';
 type Phase = 'drop' | 'loading' | 'game';
 
 // A co-op invite link carries the invite code in its fragment: #join=<code>
+// Touch controls only for devices without a mouse or trackpad. Desktop browsers can report
+// touch points (or a coarse pointer) without being touch devices, so a fine pointer wins.
+const isTouchDevice = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const phoneUA = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent);
+  const hasFine = window.matchMedia('(any-pointer: fine)').matches;
+  if (hasFine && !phoneUA) return false;
+  return phoneUA || window.matchMedia('(any-pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+};
+
 const inviteFromLink = (): string => {
   const m = window.location.hash.match(/^#join=([A-Za-z0-9_-]+)$/);
   return m ? m[1] : '';
@@ -68,7 +78,7 @@ export default function App() {
   useEffect(() => {
     if (phase !== 'game' || !assetsRef.current || !glRef.current || !hudRef.current || !wrapRef.current) return;
     const game = new Game(glRef.current, hudRef.current, assetsRef.current);
-    game.touchMode = window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+    game.touchMode = isTouchDevice();
     gameRef.current = game;
     setTouchGame(game);
     game.onCoop = () => setCoopOpen(true);

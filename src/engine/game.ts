@@ -645,7 +645,8 @@ export class Game {
   }
   onMouseMove(dx: number, dy: number) {
     if (!this.touchMode && document.pointerLockElement !== this.glCanvas && document.pointerLockElement !== this.hudCanvas) return;
-    if (this.menu || this.state !== 'playing' || this.paused || this.consoleOpen) return;
+    // The level-complete screen keeps the view still.
+    if (this.menu || this.state !== 'playing' || this.paused || this.consoleOpen || this.inter) return;
     const s = this.sens * 0.022;
     this.viewAngles[1] -= dx * s;
     this.viewAngles[0] += dy * s * (this.invertMouse ? -1 : 1);
@@ -948,8 +949,10 @@ export class Game {
     if (this.state === 'playing' && sv) {
       if (running) {
         const turn = 140 * dt * (this.alwaysRun !== (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) ? 1.5 : 1);
-        if (this.keys.has('ArrowLeft')) this.viewAngles[1] += turn;
-        if (this.keys.has('ArrowRight')) this.viewAngles[1] -= turn;
+        if (!this.inter) {
+          if (this.keys.has('ArrowLeft')) this.viewAngles[1] += turn;
+          if (this.keys.has('ArrowRight')) this.viewAngles[1] -= turn;
+        }
         const cmd = this.buildCmd();
         // A co-op joiner does not simulate: the host's state arrives over the network.
         if (!this.net || this.net.role === 'host') sv.update(dt, cmd);
