@@ -31,7 +31,7 @@ void main(){
   vec4 t = texture2D(map, uv);
   float l = texture2D(lightmap, vLm).r;
   for (int i = 0; i < 8; i++) { float d = distance(vW, dl[i].xyz); l += max(dl[i].w - d, 0.0) / 255.0; }
-  float lit = mix(min(l * 1.5, 1.0), 1.0, t.a);
+  float lit = mix(min(l * 2.0, 1.0), 1.0, t.a);
   gl_FragColor = vec4(t.rgb * lit, 1.0);
 }`;
 const ALIAS_BLEND = 0.1; // seconds to blend between animation poses
